@@ -259,61 +259,73 @@
         }
         
         /* Buttons Container */
-        .top-buttons{
-            display:flex;
-            align-items:center;
-            gap:14px;
-        }
-        
-        /* Common Button Style */
-        .link-btn{ background: var(--blue); color: #fff; box-shadow: 0 1px 3px rgba(37,99,235,.3); }
-        .link-btn:hover:not(:disabled) { background: #1D4ED8; box-shadow: 0 4px 12px rgba(37,99,235,.35); transform: translateY(-1px); }
-        .link-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
-        }
-        
-        /* Hover */
-        .link-btn:hover{
-            transform:translateY(-2px);
-        
-            box-shadow:
-                0 10px 24px rgba(37,99,235,0.35);
-        }
-        
-        /* Click */
-        .link-btn:active{
-            transform:scale(0.97);
-        }
-        
-        /* Second Button */
-        .secondary-btn{
-            background:linear-gradient(135deg,#0f172a,#1e293b);
-        
-            box-shadow:
-                0 6px 18px rgba(15,23,42,0.25);
-        }
-        
-        .secondary-btn:hover{
-            box-shadow:
-                0 10px 24px rgba(15,23,42,0.35);
-        }
-        
-        /* Responsive */
-        @media(max-width:768px){
-        
-            .logo-area{
-                flex-direction:column;
-                align-items:flex-start;
+            .top-buttons {
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }
-        
-            .top-buttons{
-                width:100%;
-                flex-wrap:wrap;
+            
+            /* Common Link Button Base */
+            .link-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 9px 18px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                text-decoration: none;
+                cursor: pointer;
+                transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+                white-space: nowrap;
+                border: none;
+                letter-spacing: 0.01em;
             }
-        
-            .link-btn{
-                width:100%;
+            
+            /* Scheme DB — Blue (matching Add Invoice) */
+            .link-btn:nth-child(1) {
+                background: #2563EB;
+                color: #fff;
+                box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
             }
-        }
+            
+            .link-btn:nth-child(1):hover {
+                background: #1D4ED8;
+                box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+                transform: translateY(-1px);
+            }
+            
+            /* Pr Order DB — Dark Slate */
+            .secondary-btn {
+                background: linear-gradient(135deg, #0f172a, #1e3a5f);
+                color: #fff;
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.3);
+            }
+            
+            .secondary-btn:hover {
+                background: linear-gradient(135deg, #1e293b, #1e40af);
+                box-shadow: 0 6px 16px rgba(15, 23, 42, 0.4);
+                transform: translateY(-1px);
+            }
+            
+            /* Active (click) */
+            .link-btn:active {
+                transform: scale(0.97);
+                box-shadow: none;
+            }
+            
+            /* Responsive */
+            @media (max-width: 768px) {
+                .top-buttons {
+                    width: 100%;
+                    flex-wrap: wrap;
+                }
+            
+                .link-btn {
+                    width: 100%;
+                    text-align: center;
+                }
+            }
     </style>
 </head>
 <body>
