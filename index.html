@@ -676,6 +676,26 @@
     </div>
 </div>
 
+
+<!-- INVOICE REMARKS MODAL -->
+<div class="modal-bg" id="modal-remarks">
+    <div class="modal modal-wide">
+        <div class="modal-hd">
+            <div class="modal-hd-icon" style="background:var(--blue-light)">📋</div>
+            <div>
+                <div class="modal-title" id="remarks-modal-name">Call History</div>
+                <div style="font-size:12px;color:var(--text-muted)" id="remarks-modal-meta"></div>
+            </div>
+            <button class="modal-close" onclick="closeModal('modal-remarks')">✕</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px">
+            <div id="remarks-modal-stats" style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap"></div>
+            <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Call History</div>
+            <div id="remarks-modal-timeline" style="max-height:460px;overflow-y:auto"></div>
+        </div>
+    </div>
+</div>
+
 <!-- FIX 1: Settings / Change API URL Modal -->
 <div class="modal-bg" id="modal-settings">
     <div class="modal" style="width:500px">
@@ -1272,7 +1292,10 @@ function renderActiveRows(pageData, pagination, allFiltered) {
       <td style="font-size:12px;font-weight:700;color:${r.dueDays>0&&!paid?'var(--red)':'var(--green)'}">${r.dueDays}d</td>
       <td>${pill(r.priority)}</td>
       <td>${paid?'<span class="badge badge-paid">Paid</span>':'<span class="badge badge-active">Active</span>'}</td>
-      <td>${!paid?`<button class="btn btn-outline btn-sm" onclick="openCallModal('${esc(r['Dealer Code'])}','${esc(r['Customer Name'])}','${esc(r['Location']||'')}','${esc(r['Invoice No.'])}',${r['Balance']})">📞</button>`:'—'}</td>
+      <td style="display:flex;gap:4px;align-items:center">
+        ${!paid?`<button class="btn btn-outline btn-sm" onclick="openCallModal('${esc(r['Dealer Code'])}','${esc(r['Customer Name'])}','${esc(r['Location']||'')}','${esc(r['Invoice No.'])}',${r['Balance']})">📞</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="openRemarksModal('${esc(r['Invoice No.'])}','${esc(r['Customer Name'])}','${esc(r['Dealer Code'])}',${r['Balance']||0})">📋</button>
+      </td>
     </tr>`;
     }).join('');
 
@@ -1829,6 +1852,75 @@ function downloadActiveExcel() {
     document.body.appendChild(a); a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 100);
     toast('Download shuru!', 'success');
+}
+
+// ══════════════════════════════════════════════════════
+// INVOICE REMARKS MODAL
+// ══════════════════════════════════════════════════════
+async function openRemarksModal(invoiceNo, customerName, dealerCode, balance) {
+    document.getElementById('remarks-modal-name').textContent = customerName + ' (' + dealerCode + ')';
+    document.getElementById('remarks-modal-meta').textContent = 'Invoice: ' + invoiceNo + '  ·  Balance: ' + fmt(balance);
+    document.getElementById('remarks-modal-timeline').innerHTML = '<div class="empty-state"><span class="icon">⏳</span><p>Loading history...</p></div>';
+    document.getElementById('remarks-modal-stats').innerHTML = '';
+    openModal('modal-remarks');
+
+    let histData = AppData.history;
+    if (!histData) {
+        const res = await api('getCallingHistory', { page: 1, pageSize: 5000 }, null, true);
+        if (res) { AppData.history = res.data; histData = res.data; }
+    }
+
+    if (!histData) {
+        document.getElementById('remarks-modal-timeline').innerHTML = '<div class="empty-state"><span class="icon">❌</span><p>History load nahi ho saki</p></div>';
+        return;
+    }
+
+    const records = histData.filter(h => h['Invoice No.'] === invoiceNo);
+
+    const totalCalls    = records.length;
+    const totalReceived = records.reduce((s,h) => s + (parseFloat(h['Amount Received'])||0), 0);
+    const totalAdj      = records.reduce((s,h) => s + (parseFloat(h['Adjustment Amount'])||0), 0);
+
+    document.getElementById('remarks-modal-stats').innerHTML = [
+        ['📞 Total Calls', totalCalls, 'var(--blue)'],
+        ['💰 Total Received', fmt(totalReceived), 'var(--green)'],
+        ['📋 Adjustments', fmt(totalAdj), 'var(--orange)'],
+        ['💳 Current Balance', fmt(balance), 'var(--red)'],
+    ].map(([lbl, val, color]) => `
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;flex:1;min-width:110px">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${lbl}</div>
+            <div style="font-size:16px;font-weight:800;color:${color};font-family:'JetBrains Mono'">${val}</div>
+        </div>`).join('');
+
+    const timeline = document.getElementById('remarks-modal-timeline');
+    if (!records.length) {
+        timeline.innerHTML = '<div class="empty-state"><span class="icon">📋</span><p>Is invoice par koi call log nahi hai abhi tak</p></div>';
+        return;
+    }
+
+    timeline.innerHTML = records.map(h => {
+        const amt = parseFloat(h['Amount Received']) || 0;
+        const adj = parseFloat(h['Adjustment Amount']) || 0;
+        const dotColor = amt > 0 ? 'var(--green)' : 'var(--blue)';
+        return `<div class="timeline-item">
+            <div class="timeline-dot" style="background:${dotColor}"></div>
+            <div class="timeline-meta" style="width:100%">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                    <span style="font-size:12px;font-weight:700;color:var(--text-primary)">${h['Timestamp']||'—'}</span>
+                    <div style="display:flex;gap:8px;flex-shrink:0">
+                        ${amt>0?`<span style="font-family:'JetBrains Mono';font-size:13px;font-weight:700;color:var(--green)">+${fmt(amt)}</span>`:''}
+                        ${adj>0?`<span style="font-family:'JetBrains Mono';font-size:12px;color:var(--orange)">ADJ: ${fmt(adj)}</span>`:''}
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px;display:flex;gap:14px;flex-wrap:wrap">
+                    ${h['Follow Up Date']?`<span>📅 Follow-up: <strong>${fmtDate(h['Follow Up Date'])}</strong></span>`:''}
+                    ${h['Scheduled Follow-up']?`<span>📌 Scheduled: ${fmtDate(h['Scheduled Follow-up'])}</span>`:''}
+                </div>
+                ${h['Remarks']?`<div style="font-size:13px;color:var(--text-secondary);margin-top:7px;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);border-left:3px solid ${dotColor}">💬 ${h['Remarks']}</div>`:''}
+                ${adj>0&&h['Adjustment Remarks']?`<div style="font-size:11.5px;color:var(--orange);margin-top:5px;padding:5px 10px;background:var(--orange-bg);border-radius:var(--radius-sm)">⚠️ Adjustment Reason: ${h['Adjustment Remarks']}</div>`:''}
+            </div>
+        </div>`;
+    }).join('');
 }
 
 // ══════════════════════════════════════════════════════
