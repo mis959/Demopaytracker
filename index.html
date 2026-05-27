@@ -1383,7 +1383,9 @@ function renderArchivedRows(data, pagination) {
     tbody.innerHTML = data.map((r,i) => `
     <tr>
       <td style="color:var(--text-muted)">${start+i+1}</td>
-  <td><span class="badge badge-reminder" style="font-size:11px">${r['Dealer Type']||'—'}</span></td>
+      <td><div class="td-primary">${r['Customer Name']}</div><div style="font-size:11px;color:var(--text-muted)">${r['Dealer Code']}</div></td>
+      <td><span class="mono">${r['Invoice No.']}</span></td>
+      <td><span class="badge badge-reminder" style="font-size:11px">${r['Dealer Type']||'—'}</span></td>
       <td style="font-size:12px">${r['Sales Person']||'—'}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${fmt(r['Invoice Amount'])}</td>
       <td style="font-size:12px">${fmtDate(r['Payment Due Date'])}</td>
