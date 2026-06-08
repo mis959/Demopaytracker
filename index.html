@@ -570,7 +570,7 @@
             <div class="card">
                 <div class="card-head"><span class="card-title">Call History</span><button class="btn btn-ghost btn-sm" onclick="loadHistory(true)" style="margin-left:auto">↺ Refresh</button></div>
                 <div class="tbl-wrap"><table>
-                    <thead><tr><th>#</th><th>Date & Time</th><th>Customer</th><th>Invoice</th><th>Amount Recd.</th><th>Scheduled For</th><th>Next Follow-up</th><th>Remarks</th><th>ADJ.</th><th>ADJ. Remarks</th></tr></thead>
+                    <thead><tr><th>#</th><th>Date & Time</th><th>Customer</th><th>Invoice</th><th>Amount Recd.</th><th>Scheduled For</th><th>Next Follow-up</th><th>Remarks</th><th>ADJ.</th><th>ADJ. Remarks</th><th>Logged By</th></tr></thead>
                     <tbody id="tbl-history"></tbody>
                 </table></div>
                 <div class="pagination" id="history-pagination"></div>
@@ -1344,9 +1344,10 @@ function renderHistoryRows(records, pagination) {
       <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${r['Amount Received']>0?'var(--green)':'var(--text-muted)'}">${r['Amount Received']>0?fmt(r['Amount Received']):'—'}</td>
       <td style="font-size:12px">${r['Scheduled Follow-up']?fmtDate(r['Scheduled Follow-up']):'—'}</td>
       <td style="font-size:12px">${r['Follow Up Date']?fmtDate(r['Follow Up Date']):'—'}</td>
-      <td style="font-size:12px;max-width:200px;white-space:normal">${r['Remarks']||'—'}</td>
+      <td style="font-size:12px">${r['Remarks']||'—'}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${r['Adjustment Amount']>0?fmt(r['Adjustment Amount']):'—'}</td>
       <td style="font-size:12px">${r['Adjustment Remarks']||'—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${r['Logged By']||'—'}</td>
     </tr>`).join('');
 
     renderPagination('history-pagination', pagination, pg => {
