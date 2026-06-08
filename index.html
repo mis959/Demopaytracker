@@ -544,10 +544,7 @@
     </nav>
     <div class="sidebar-footer">
         <span class="sidebar-footer-txt">PayTrack v12.1 &nbsp;·&nbsp; © 2026</span>
-        <button class="settings-btn" onclick="openSettingsModal()" title="Change Web App URL">
-            ⚙️ Settings
-        </button>
-    </div>
+     </div>
 </aside>
 
 <div class="main">
@@ -848,8 +845,8 @@
 // PAYTRACK v12.1 — with Login System
 // ══════════════════════════════════════════════════════
 
-let WEBAPP_URL = localStorage.getItem('paytrack_webapp_url') || '';
-
+let WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwFud_Al-nPoMVoz7_F25UzBRBT2oizEDvgAqGvQZrB24B1jjs5Gi_SGWPJcl7BqNKf/exec';
+    
 // ══════════════════════════════════════════════════════
 // SESSION MANAGEMENT
 // sessionStorage = tab close hone par auto-clear
@@ -913,16 +910,16 @@ async function doLogin() {
         errEl.textContent = '⚠️ Email aur password dono required hain';
         errEl.style.display = 'block'; return;
     }
-    if (!WEBAPP_URL) {
-        errEl.textContent = '⚙️ Web App URL set nahi hai — pehle URL configure karo';
-        errEl.style.display = 'block';
-        // Settings modal kholo
-        setTimeout(() => {
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('config-banner').classList.remove('hidden');
-        }, 1200);
-        return;
-    }
+    // if (!WEBAPP_URL) {
+    //     errEl.textContent = '⚙️ Web App URL set nahi hai — pehle URL configure karo';
+    //     errEl.style.display = 'block';
+    //     // Settings modal kholo
+    //     setTimeout(() => {
+    //         document.getElementById('login-screen').style.display = 'none';
+    //         document.getElementById('config-banner').classList.remove('hidden');
+    //     }, 1200);
+    //     return;
+    // }
 
     btn.disabled = true;
     btn.innerHTML = '<span class="btn-spinner"></span> Verifying...';
