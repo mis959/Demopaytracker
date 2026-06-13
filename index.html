@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <style>
         /* ══════════════════════════════════════════════
-           PREMIUM SLATE-INK DESIGN SYSTEM v12.1
+           PREMIUM SLATE-INK DESIGN SYSTEM v12.2
            Palette: Deep Ink sidebar · Cool Slate canvas
            Accents: Indigo primary · Jewel-tone semantics
            ══════════════════════════════════════════════ */
@@ -289,6 +289,10 @@
         .progress-bar-wrap.show { opacity: 1; }
         .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--blue), #8BA4FF); transition: width .4s cubic-bezier(.4,0,.2,1); }
 
+        /* SWR refresh pulse — subtle border glow when background update is running */
+        @keyframes swrPulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+        .swr-refreshing { animation: swrPulse 1.2s ease infinite; }
+
         .sk { background: linear-gradient(90deg, #EBEff5 25%, #DDE3EC 50%, #EBEff5 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 6px; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         .sk-text { height: 12px; width: 100%; margin: 8px 0; }
@@ -411,6 +415,7 @@
         @keyframes toastIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
         .cache-badge { font-size: 10px; background: var(--green-bg); color: var(--green); padding: 2px 7px; border-radius: 10px; font-weight: 700; margin-left: 6px; vertical-align: middle; }
+        .swr-badge   { font-size: 10px; background: var(--blue-light); color: var(--blue); padding: 2px 7px; border-radius: 10px; font-weight: 700; margin-left: 6px; vertical-align: middle; animation: swrPulse 1.2s ease infinite; }
 
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 20px; color: var(--text-muted); gap: 10px; }
         .empty-state .icon { font-size: 36px; opacity: .35; }
@@ -476,10 +481,6 @@
 </head>
 <body>
 
-<!-- ══════════════════════════════════════════════════
-     LOGIN SCREEN
-     sessionStorage use ho rahi hai — tab close = auto logout
-     ══════════════════════════════════════════════════ -->
 <div id="login-screen">
     <div class="login-card">
         <div class="login-header">
@@ -505,9 +506,8 @@
             </button>
         </div>
     </div>
-    <div class="login-footer-txt">PayTrack v12.1 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
+    <div class="login-footer-txt">PayTrack v12.2 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
 </div>
-<!-- ═══════════════════════════════════════════════════ -->
 
 <div class="progress-bar-wrap" id="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
 
@@ -526,7 +526,6 @@
         </div>
     </div>
 
-    <!-- User badge — login ke baad dikhega -->
     <div id="user-badge-container"></div>
 
     <nav>
@@ -543,7 +542,7 @@
         <button class="nav-btn" onclick="hardRefresh()"><span class="nav-icon">🔄</span> Force Refresh</button>
     </nav>
     <div class="sidebar-footer">
-        <span class="sidebar-footer-txt">PayTrack v12.1 &nbsp;·&nbsp; © 2026</span>
+        <span class="sidebar-footer-txt">PayTrack v12.2 &nbsp;·&nbsp; © 2026</span>
      </div>
 </aside>
 
@@ -671,6 +670,7 @@
                 <div class="card-head">
                     <span class="card-title">Active Payments</span>
                     <span class="card-subtitle" id="active-count"></span>
+                    <span id="active-swr-badge"></span>
                     <button class="btn btn-ghost btn-sm" onclick="loadActive(true)" style="margin-left:8px">↺</button>
                 </div>
                 <div class="tbl-wrap"><table>
@@ -684,7 +684,11 @@
         <!-- CALL HISTORY -->
         <div class="page" id="page-history">
             <div class="card">
-                <div class="card-head"><span class="card-title">Call History</span><button class="btn btn-ghost btn-sm" onclick="loadHistory(true)" style="margin-left:auto">↺ Refresh</button></div>
+                <div class="card-head">
+                    <span class="card-title">Call History</span>
+                    <span id="history-swr-badge"></span>
+                    <button class="btn btn-ghost btn-sm" onclick="loadHistory(true)" style="margin-left:auto">↺ Refresh</button>
+                </div>
                 <div class="tbl-wrap"><table>
                     <thead><tr><th>#</th><th>Date & Time</th><th>Customer</th><th>Invoice</th><th>Amount Recd.</th><th>Scheduled For</th><th>Next Follow-up</th><th>Remarks</th><th>ADJ.</th><th>ADJ. Remarks</th></tr></thead>
                     <tbody id="tbl-history"></tbody>
@@ -712,6 +716,7 @@
                 <div class="card-head">
                     <span class="card-title">Archived Payments</span>
                     <span class="card-subtitle" id="archive-count">Historical paid records</span>
+                    <span id="archived-swr-badge"></span>
                     <button class="btn btn-primary btn-sm" onclick="runArchiveNow()" style="margin-left:auto;background:var(--green)">📦 Archive Paid Now</button>
                 </div>
                 <div class="tbl-wrap"><table>
@@ -842,17 +847,24 @@
 
 <script>
 // ══════════════════════════════════════════════════════
-// PAYTRACK v12.1 — with Login System
+// PAYTRACK v12.2 — SWR + Fast Remarks Index
+// Changes from v12.1:
+//   • Stale-While-Revalidate (SWR) on all pages
+//     → Cache dikhao INSTANTLY, background mein refresh
+//   • AppIndex (Map-based) — O(1) invoice/dealer history lookup
+//     → Remarks modal ab instant open hoga
+//   • _preloadHistory() — Active page load ke saath silently
+//     history preload hoti hai so first remarks click is also fast
+//   • submitLogCall — history cache ko preserve & update karta hai
+//     instead of nulling it (no re-fetch needed)
 // ══════════════════════════════════════════════════════
 
 let WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwFud_Al-nPoMVoz7_F25UzBRBT2oizEDvgAqGvQZrB24B1jjs5Gi_SGWPJcl7BqNKf/exec';
-    
+
 // ══════════════════════════════════════════════════════
 // SESSION MANAGEMENT
-// sessionStorage = tab close hone par auto-clear
-// Tab refresh ya internal navigation par bana rahega
 // ══════════════════════════════════════════════════════
-let _currentUser = null; // { email, name }
+let _currentUser = null;
 
 function _checkSession() {
     const saved = sessionStorage.getItem('pt_user');
@@ -862,16 +874,8 @@ function _checkSession() {
     }
     return false;
 }
-
-function _saveSession(user) {
-    _currentUser = user;
-    sessionStorage.setItem('pt_user', JSON.stringify(user));
-}
-
-function _clearSession() {
-    _currentUser = null;
-    sessionStorage.removeItem('pt_user');
-}
+function _saveSession(user)  { _currentUser = user; sessionStorage.setItem('pt_user', JSON.stringify(user)); }
+function _clearSession()     { _currentUser = null; sessionStorage.removeItem('pt_user'); }
 
 function _renderUserBadge(user) {
     const container = document.getElementById('user-badge-container');
@@ -900,30 +904,15 @@ async function doLogin() {
     const passEl  = document.getElementById('login-pass');
     const errEl   = document.getElementById('login-error');
     const btn     = document.getElementById('login-btn');
-
-    const email = emailEl.value.trim();
-    const pass  = passEl.value.trim();
-
+    const email   = emailEl.value.trim();
+    const pass    = passEl.value.trim();
     errEl.style.display = 'none';
-
     if (!email || !pass) {
         errEl.textContent = '⚠️ Email aur password dono required hain';
         errEl.style.display = 'block'; return;
     }
-    // if (!WEBAPP_URL) {
-    //     errEl.textContent = '⚙️ Web App URL set nahi hai — pehle URL configure karo';
-    //     errEl.style.display = 'block';
-    //     // Settings modal kholo
-    //     setTimeout(() => {
-    //         document.getElementById('login-screen').style.display = 'none';
-    //         document.getElementById('config-banner').classList.remove('hidden');
-    //     }, 1200);
-    //     return;
-    // }
-
     btn.disabled = true;
     btn.innerHTML = '<span class="btn-spinner"></span> Verifying...';
-
     try {
         const res = await fetch(WEBAPP_URL, {
             method: 'POST',
@@ -934,7 +923,6 @@ async function doLogin() {
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const text = await res.text();
         const data = JSON.parse(text.replace(/^\uFEFF/, '').trim());
-
         if (data.success) {
             _saveSession(data.user);
             document.getElementById('login-screen').style.display = 'none';
@@ -956,10 +944,57 @@ async function doLogin() {
     }
 }
 
+// ══════════════════════════════════════════════════════
+// APP DATA — PAGE CACHE
+// ══════════════════════════════════════════════════════
 const AppData = {
     dashboard: null, today: null, active: null,
     activeAll: null, history: null, analysis: null, archived: null,
 };
+
+// ══════════════════════════════════════════════════════
+// APP INDEX — O(1) HISTORY LOOKUP
+// Invoice ya dealer ke liye full history scan karne ki
+// zaroorat nahi — Map se seedha milega
+// ══════════════════════════════════════════════════════
+const AppIndex = {
+    invoiceHistory: null,  // Map<invoiceNo, records[]>
+    dealerHistory:  null,  // Map<dealerCode, records[]>
+    built: false,
+};
+
+function _buildHistoryIndex(records) {
+    AppIndex.invoiceHistory = new Map();
+    AppIndex.dealerHistory  = new Map();
+    for (const h of records) {
+        const inv = (h['Invoice No.'] || '').trim();
+        const dc  = (h['Dealer Code']  || '').trim();
+        if (inv) {
+            if (!AppIndex.invoiceHistory.has(inv)) AppIndex.invoiceHistory.set(inv, []);
+            AppIndex.invoiceHistory.get(inv).push(h);
+        }
+        if (dc) {
+            if (!AppIndex.dealerHistory.has(dc)) AppIndex.dealerHistory.set(dc, []);
+            AppIndex.dealerHistory.get(dc).push(h);
+        }
+    }
+    AppIndex.built = true;
+}
+
+// New call entry ko index mein add karo (full re-fetch ki zaroorat nahi)
+function _indexNewCallEntry(entry) {
+    if (!AppIndex.built) return;
+    const inv = (entry['Invoice No.'] || '').trim();
+    const dc  = (entry['Dealer Code']  || '').trim();
+    if (inv) {
+        if (!AppIndex.invoiceHistory.has(inv)) AppIndex.invoiceHistory.set(inv, []);
+        AppIndex.invoiceHistory.get(inv).unshift(entry); // Latest first
+    }
+    if (dc) {
+        if (!AppIndex.dealerHistory.has(dc)) AppIndex.dealerHistory.set(dc, []);
+        AppIndex.dealerHistory.get(dc).unshift(entry);
+    }
+}
 
 const AppState = {
     currentPage: 'dashboard', activeFilter: 'all',
@@ -985,7 +1020,6 @@ function saveWebAppUrl() {
     localStorage.setItem('paytrack_webapp_url', val);
     document.getElementById('config-banner').classList.add('hidden');
     toast('URL saved! Ab login karo...', 'success');
-    // Show login screen again
     setTimeout(() => {
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('login-email').focus();
@@ -1012,8 +1046,8 @@ function saveSettingsUrl() {
     document.getElementById('config-banner').classList.add('hidden');
     closeModal('modal-settings');
     if (isChanged) {
-        AppData.dashboard = null; AppData.today = null; AppData.active = null;
-        AppData.activeAll = null; AppData.history = null; AppData.analysis = null; AppData.archived = null;
+        Object.keys(AppData).forEach(k => AppData[k] = null);
+        AppIndex.invoiceHistory = null; AppIndex.dealerHistory = null; AppIndex.built = false;
         toast('✅ URL saved! Reconnecting...', 'success');
         setTimeout(() => loadDashboard(true), 300);
     } else {
@@ -1027,23 +1061,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('today-date').textContent =
         now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
     document.getElementById('f-dd').value = now.toISOString().split('T')[0];
-
-    // CASE 1: No WEBAPP_URL — show config banner, hide login
     if (!WEBAPP_URL) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('config-banner').classList.remove('hidden');
         return;
     }
-
-    // CASE 2: Session already exists (same tab refresh/navigation)
     if (_checkSession()) {
         document.getElementById('login-screen').style.display = 'none';
         _renderUserBadge(_currentUser);
         loadDashboard();
         return;
     }
-
-    // CASE 3: URL set but not logged in → show login screen (default)
     document.getElementById('login-email').focus();
 });
 
@@ -1078,7 +1106,7 @@ async function api(action, payload, query, silent) {
     if (!silent) startProgress();
     const body = { action };
     if (payload !== undefined) body.payload = payload;
-    if (query !== undefined) body.query = query;
+    if (query   !== undefined) body.query   = query;
     try {
         const res = await fetch(WEBAPP_URL, {
             method: 'POST',
@@ -1103,6 +1131,20 @@ async function api(action, payload, query, silent) {
 }
 
 // ══════════════════════════════════════════════════════
+// SWR BADGE HELPERS
+// Card header mein "↻ Refreshing" badge dikhao jab
+// background refresh chal raha ho
+// ══════════════════════════════════════════════════════
+function _showSwrBadge(id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="swr-badge">↻ Refreshing</span>';
+}
+function _hideSwrBadge(id) {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+}
+
+// ══════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════
 const PAGE_META = {
@@ -1124,7 +1166,7 @@ function nav(page, force) {
     if (navBtn) navBtn.classList.add('active');
     const [title, sub] = PAGE_META[page] || [page, ''];
     document.getElementById('page-title').textContent = title;
-    document.getElementById('page-sub').textContent = sub;
+    document.getElementById('page-sub').textContent   = sub;
     AppState.currentPage = page;
     if (page === 'dashboard') loadDashboard(force);
     if (page === 'today')     loadToday(force);
@@ -1135,8 +1177,8 @@ function nav(page, force) {
 }
 
 async function hardRefresh() {
-    AppData.dashboard = null; AppData.today = null; AppData.active = null;
-    AppData.activeAll = null; AppData.history = null; AppData.analysis = null; AppData.archived = null;
+    Object.keys(AppData).forEach(k => AppData[k] = null);
+    AppIndex.invoiceHistory = null; AppIndex.dealerHistory = null; AppIndex.built = false;
     AppState.sessionCallCounts = {}; AppState.lastCallMap = {};
     await api('clearCache', null, null, true);
     toast('Cache cleared! Refreshing...', 'info');
@@ -1144,26 +1186,42 @@ async function hardRefresh() {
 }
 
 // ══════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD — SWR
 // ══════════════════════════════════════════════════════
 async function loadDashboard(force) {
-    if (!force && AppData.dashboard) { renderDashboard(AppData.dashboard, true); return; }
+    if (!force && AppData.dashboard) {
+        renderDashboard(AppData.dashboard, true);
+        // Background refresh (silent, no progress bar)
+        _bgRefreshDashboard();
+        return;
+    }
     const res = await api('getDashboardData');
     if (!res) return;
     AppData.dashboard = res.data;
     renderDashboard(res.data, res.fromCache);
-    if (!AppData.today) api('getTodayCalling', null, null, true).then(r => { if (r) AppData.today = r.data; });
+    // Preload today's calling silently
+    if (!AppData.today) {
+        api('getTodayCalling', null, null, true).then(r => { if (r) AppData.today = r.data; });
+    }
+}
+
+async function _bgRefreshDashboard() {
+    const res = await api('getDashboardData', null, null, true);
+    if (res) {
+        AppData.dashboard = res.data;
+        if (AppState.currentPage === 'dashboard') renderDashboard(res.data, false);
+    }
 }
 
 function renderDashboard(d, fromCache) {
     document.getElementById('last-update-time').textContent = new Date().toLocaleTimeString();
     document.getElementById('cache-indicator').innerHTML = fromCache ? '<span class="cache-badge">⚡ Cached</span>' : '';
-    document.getElementById('s-total').textContent = fmt(d.totalOutstanding);
-    document.getElementById('s-overdue').textContent = fmt(d.overdue);
-    document.getElementById('s-soon').textContent = fmt(d.dueSoon);
-    document.getElementById('s-calls').textContent = d.todayCallCount;
-    document.getElementById('s-parties').textContent = d.activeParties || 0;
-    document.getElementById('s-records').textContent = `${d.totalRecords} pending invoices`;
+    document.getElementById('s-total').textContent    = fmt(d.totalOutstanding);
+    document.getElementById('s-overdue').textContent  = fmt(d.overdue);
+    document.getElementById('s-soon').textContent     = fmt(d.dueSoon);
+    document.getElementById('s-calls').textContent    = d.todayCallCount;
+    document.getElementById('s-parties').textContent  = d.activeParties || 0;
+    document.getElementById('s-records').textContent  = `${d.totalRecords} pending invoices`;
     document.getElementById('badge-today').textContent = d.todayCallCount;
     renderAging(d.agingBuckets, d.totalOutstanding);
     renderTopOverdue(d.topOverdue || []);
@@ -1226,8 +1284,8 @@ function _parseDateToStr(val) {
 function _categorizeTodayRecords(records) {
     const todayRecs = [], pendingRecs = [];
     for (const r of records) {
-        const fupStr = _parseDateToStr(r['Next Follow-up']);
-        const od = typeof r.overdueDays === 'number' ? r.overdueDays : (r.dueDays || 0);
+        const fupStr    = _parseDateToStr(r['Next Follow-up']);
+        const od        = typeof r.overdueDays === 'number' ? r.overdueDays : (r.dueDays || 0);
         const fupIsToday  = fupStr === _todayStr;
         const fupIsPast   = fupStr && fupStr < _todayStr;
         const fupIsFuture = fupStr && fupStr > _todayStr;
@@ -1258,7 +1316,14 @@ function setTodayFilter(f, el) {
 }
 
 async function loadToday(force) {
-    if (!force && AppData.today) { renderToday(AppData.today); return; }
+    if (!force && AppData.today) {
+        renderToday(AppData.today);
+        // Background refresh
+        api('getTodayCalling', null, null, true).then(r => {
+            if (r) { AppData.today = r.data; if (AppState.currentPage === 'today') renderToday(r.data); }
+        });
+        return;
+    }
     document.getElementById('call-list-container').innerHTML = '<div class="card"><div class="card-body">' + Array(4).fill('<div class="sk sk-row" style="margin:6px 0"></div>').join('') + '</div></div>';
     const res = await api('getTodayCalling');
     if (!res) return;
@@ -1270,8 +1335,8 @@ function renderToday(records) {
     const { todayRecs, pendingRecs } = _categorizeTodayRecords(records);
     const sortedToday   = _sortTodayRecords(todayRecs);
     const sortedPending = _sortTodayRecords(pendingRecs);
-    document.getElementById('badge-today').textContent = sortedToday.length;
-    document.getElementById('today-count-badge').textContent = sortedToday.length;
+    document.getElementById('badge-today').textContent         = sortedToday.length;
+    document.getElementById('today-count-badge').textContent   = sortedToday.length;
     document.getElementById('pending-count-badge').textContent = sortedPending.length;
     const filtered = AppState.todayFilter === 'pending' ? sortedPending : sortedToday;
     const counts = { Critical:0, High:0, Medium:0, Normal:0, Reminder:0 };
@@ -1290,12 +1355,12 @@ function renderToday(records) {
 function _buildCallCardHTML(r) {
     const icons  = { Critical:'🚨', High:'⚠️', Medium:'📌', Normal:'📞', Reminder:'🔔' };
     const iconBg = { Critical:'var(--red-bg)', High:'var(--orange-bg)', Medium:'var(--yellow-bg)', Normal:'var(--green-bg)', Reminder:'var(--blue-light)' };
-    const prio   = r.priority || 'Normal';
+    const prio      = r.priority || 'Normal';
     const callCount = AppState.sessionCallCounts[r['Invoice No.']] || 0;
     const callBadge = callCount > 0 ? `<span class="call-count-badge">✅ Called ${callCount}x</span>` : '';
     const hasRemark = r['Last Remarks'] && r['Last Remarks'] !== '-' && r['Last Remarks'] !== 'No Previous Call';
-    const fupStr = _parseDateToStr(r['Next Follow-up']);
-    const fupLabel = r['Next Follow-up']
+    const fupStr    = _parseDateToStr(r['Next Follow-up']);
+    const fupLabel  = r['Next Follow-up']
         ? `<span style="color:${fupStr===_todayStr?'var(--blue)':'var(--text-muted)'}">📅 Follow-up: ${r['Next Follow-up']}</span>`
         : '';
     const od = typeof r.overdueDays === 'number' ? r.overdueDays : (r.dueDays || 0);
@@ -1332,7 +1397,7 @@ function _buildCallCardHTML(r) {
 }
 
 // ══════════════════════════════════════════════════════
-// IN-PLACE CARD UPDATE
+// IN-PLACE CARD UPDATE (Today's Calling)
 // ══════════════════════════════════════════════════════
 function _updateCardInPlace(invoiceNo, payload) {
     const newFupStr = _parseDateToStr(payload.followUpDate);
@@ -1343,16 +1408,16 @@ function _updateCardInPlace(invoiceNo, payload) {
         if (rec) {
             rec['Balance'] = Math.max(0, (rec['Balance'] || 0) - amtPaid - adjPaid);
             if (payload.followUpDate) rec['Next Follow-up'] = payload.followUpDate;
-            rec['Last Remarks'] = payload.remarks;
-            rec['Last Call Date'] = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+            rec['Last Remarks']    = payload.remarks;
+            rec['Last Call Date']  = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
         }
     }
     if (!AppData.today) return;
     const { todayRecs, pendingRecs } = _categorizeTodayRecords(AppData.today);
     const sortedToday   = _sortTodayRecords(todayRecs);
     const sortedPending = _sortTodayRecords(pendingRecs);
-    document.getElementById('badge-today').textContent = sortedToday.length;
-    document.getElementById('today-count-badge').textContent = sortedToday.length;
+    document.getElementById('badge-today').textContent         = sortedToday.length;
+    document.getElementById('today-count-badge').textContent   = sortedToday.length;
     document.getElementById('pending-count-badge').textContent = sortedPending.length;
     const currentFiltered = AppState.todayFilter === 'pending' ? sortedPending : sortedToday;
     const stillInTab = currentFiltered.some(r => r['Invoice No.'] === invoiceNo);
@@ -1390,16 +1455,49 @@ function _updateChips(records) {
 }
 
 // ══════════════════════════════════════════════════════
-// ACTIVE PAYMENTS
+// ACTIVE PAYMENTS — SWR
 // ══════════════════════════════════════════════════════
 async function loadActive(force) {
-    if (!force && AppData.activeAll) { applyActiveFilter(); return; }
+    if (!force && AppData.activeAll) {
+        applyActiveFilter();
+        // Background refresh silently
+        _bgRefreshActive();
+        // Also preload history index in background if not done
+        _preloadHistory();
+        return;
+    }
     document.getElementById('tbl-active').innerHTML = Array(6).fill('<tr><td colspan="15"><div class="sk sk-row"></div></td></tr>').join('');
     const res = await api('getActivePayments', { page: 1, pageSize: 500 });
     if (!res) return;
     AppData.activeAll = res.data;
     AppState.activePage = 1;
     applyActiveFilter();
+    // Preload history in background so first remarks click is instant
+    _preloadHistory();
+}
+
+async function _bgRefreshActive() {
+    _showSwrBadge('active-swr-badge');
+    const res = await api('getActivePayments', { page:1, pageSize:500 }, null, true);
+    _hideSwrBadge('active-swr-badge');
+    if (res) {
+        AppData.activeAll = res.data;
+        if (AppState.currentPage === 'active') applyActiveFilter();
+    }
+}
+
+// History preload — silently fetch & index kar lo
+// Taaki remarks modal pehli baar bhi instant ho
+let _historyPreloading = false;
+async function _preloadHistory() {
+    if (AppIndex.built || _historyPreloading) return;
+    _historyPreloading = true;
+    const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
+    _historyPreloading = false;
+    if (res) {
+        AppData.history = res.data;
+        _buildHistoryIndex(res.data);
+    }
 }
 
 function filterActive(f, el) {
@@ -1412,9 +1510,9 @@ function filterActive(f, el) {
 function applyActiveFilter() {
     const f = AppState.activeFilter;
     let data = AppData.activeAll || [];
-    if (f === 'Paid')   data = data.filter(r => r.status === 'Paid');
+    if      (f === 'Paid')   data = data.filter(r => r.status === 'Paid');
     else if (f === 'Active') data = data.filter(r => r.status !== 'Paid');
-    else if (f !== 'all') data = data.filter(r => r.priority === f && r.status !== 'Paid');
+    else if (f !== 'all')    data = data.filter(r => r.priority === f && r.status !== 'Paid');
     const ps = PAGE_SIZE.active, total = data.length, pg = AppState.activePage;
     const start = (pg-1)*ps;
     renderActiveRows(data.slice(start, start+ps), { page:pg, pageSize:ps, total, totalPages:Math.ceil(total/ps) }, data);
@@ -1455,9 +1553,9 @@ function renderActiveRows(pageData, pagination, allFiltered) {
         AppState.activePage = pg;
         const f = AppState.activeFilter;
         let data = AppData.activeAll || [];
-        if (f === 'Paid') data = data.filter(r => r.status === 'Paid');
+        if      (f === 'Paid')   data = data.filter(r => r.status === 'Paid');
         else if (f === 'Active') data = data.filter(r => r.status !== 'Paid');
-        else if (f !== 'all') data = data.filter(r => r.priority === f && r.status !== 'Paid');
+        else if (f !== 'all')    data = data.filter(r => r.priority === f && r.status !== 'Paid');
         const ps = PAGE_SIZE.active, start = (pg-1)*ps;
         renderActiveRows(data.slice(start, start+ps), { page:pg, pageSize:ps, total:data.length, totalPages:Math.ceil(data.length/ps) }, data);
         window.scrollTo({ top:0, behavior:'smooth' });
@@ -1465,25 +1563,47 @@ function renderActiveRows(pageData, pagination, allFiltered) {
 }
 
 // ══════════════════════════════════════════════════════
-// CALL HISTORY
+// CALL HISTORY — SWR + build index on load
 // ══════════════════════════════════════════════════════
 async function loadHistory(force) {
     if (!force && AppData.history) {
         const ps = PAGE_SIZE.history;
         renderHistoryRows(AppData.history.slice(0,ps), { page:1, pageSize:ps, total:AppData.history.length, totalPages:Math.ceil(AppData.history.length/ps) });
+        // Background refresh
+        _bgRefreshHistory();
         return;
     }
     document.getElementById('tbl-history').innerHTML = Array(5).fill('<tr><td colspan="10"><div class="sk sk-row"></div></td></tr>').join('');
     const res = await api('getCallingHistory', { page:1, pageSize:500 });
     if (!res) return;
-    AppData.history = res.data; AppState.historyPage = 1;
+    AppData.history = res.data;
+    AppState.historyPage = 1;
+    _buildHistoryIndex(res.data); // Index build karo
     const ps = PAGE_SIZE.history;
     renderHistoryRows(res.data.slice(0,ps), { page:1, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
 }
 
+async function _bgRefreshHistory() {
+    _showSwrBadge('history-swr-badge');
+    const res = await api('getCallingHistory', { page:1, pageSize:500 }, null, true);
+    _hideSwrBadge('history-swr-badge');
+    if (res) {
+        AppData.history = res.data;
+        _buildHistoryIndex(res.data);
+        if (AppState.currentPage === 'history') {
+            const ps = PAGE_SIZE.history, pg = AppState.historyPage;
+            const start = (pg-1)*ps;
+            renderHistoryRows(res.data.slice(start, start+ps), { page:pg, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
+        }
+    }
+}
+
 function renderHistoryRows(records, pagination) {
     const tbody = document.getElementById('tbl-history');
-    if (!records.length) { tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><span class="icon">📋</span><p>Koi record nahi</p></div></td></tr>`; document.getElementById('history-pagination').innerHTML=''; return; }
+    if (!records.length) {
+        tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><span class="icon">📋</span><p>Koi record nahi</p></div></td></tr>`;
+        document.getElementById('history-pagination').innerHTML = ''; return;
+    }
     const start = (pagination.page-1)*pagination.pageSize;
     tbody.innerHTML = records.map((r,i) => `
     <tr>
@@ -1507,12 +1627,14 @@ function renderHistoryRows(records, pagination) {
 }
 
 // ══════════════════════════════════════════════════════
-// ARCHIVES
+// ARCHIVES — SWR
 // ══════════════════════════════════════════════════════
 async function loadArchived(force) {
     if (!force && AppData.archived) {
         const ps = PAGE_SIZE.archived;
         renderArchivedRows(AppData.archived.slice(0,ps), { page:1, pageSize:ps, total:AppData.archived.length, totalPages:Math.ceil(AppData.archived.length/ps) });
+        // Background refresh
+        _bgRefreshArchived();
         return;
     }
     document.getElementById('tbl-archived').innerHTML = Array(5).fill('<tr><td colspan="9"><div class="sk sk-row"></div></td></tr>').join('');
@@ -1524,9 +1646,24 @@ async function loadArchived(force) {
     renderArchivedRows(res.data.slice(0,ps), { page:1, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
 }
 
+async function _bgRefreshArchived() {
+    _showSwrBadge('archived-swr-badge');
+    const res = await api('getArchivedData', { page:1, pageSize:500 }, null, true);
+    _hideSwrBadge('archived-swr-badge');
+    if (res && AppState.currentPage === 'archived') {
+        AppData.archived = res.data;
+        document.getElementById('archive-count').textContent = `${res.pagination.total} historical records`;
+        const ps = PAGE_SIZE.archived;
+        renderArchivedRows(res.data.slice(0,ps), { page:1, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
+    }
+}
+
 function renderArchivedRows(data, pagination) {
     const tbody = document.getElementById('tbl-archived');
-    if (!data.length) { tbody.innerHTML=`<tr><td colspan="9"><div class="empty-state"><span class="icon">📁</span><p>Koi record nahi</p></div></td></tr>`; document.getElementById('archived-pagination').innerHTML=''; return; }
+    if (!data.length) {
+        tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><span class="icon">📁</span><p>Koi record nahi</p></div></td></tr>`;
+        document.getElementById('archived-pagination').innerHTML = ''; return;
+    }
     const start = (pagination.page-1)*pagination.pageSize;
     tbody.innerHTML = data.map((r,i) => `
     <tr>
@@ -1577,7 +1714,7 @@ function renderPagination(containerId, pg, onPageClick) {
 }
 
 // ══════════════════════════════════════════════════════
-// ANALYSIS
+// ANALYSIS — SWR
 // ══════════════════════════════════════════════════════
 let analysisView = 'user';
 
@@ -1590,15 +1727,37 @@ function setAnalysisView(view, el) {
 }
 
 async function loadAnalysis(force) {
-    if (!force && AppData.analysis && AppData.history) { renderCurrentAnalysis(AppData.analysis, AppData.history); return; }
-    document.getElementById('analysis-content').innerHTML = `<div class="empty-state"><span class="icon">⏳</span><p>Analyzing data...</p></div>`;
+    const hasCache = AppData.analysis && AppData.history;
+    if (!force && hasCache) {
+        renderCurrentAnalysis(AppData.analysis, AppData.history);
+        // Background refresh
+        _bgRefreshAnalysis();
+        return;
+    }
+    if (!hasCache) {
+        document.getElementById('analysis-content').innerHTML = `<div class="empty-state"><span class="icon">⏳</span><p>Analyzing data...</p></div>`;
+    }
     const [resA, resH] = await Promise.all([
         api('getAnalysisData', null, null, true),
-        AppData.history ? Promise.resolve({ success:true, data:AppData.history }) : api('getCallingHistory', { page:1, pageSize:5000 }, null, true)
+        AppData.history
+            ? Promise.resolve({ success:true, data:AppData.history })
+            : api('getCallingHistory', { page:1, pageSize:5000 }, null, true)
     ]);
     if (resA) AppData.analysis = resA.data;
-    if (resH) AppData.history = resH.data;
+    if (resH) { AppData.history = resH.data; _buildHistoryIndex(resH.data); }
     if (AppData.analysis) renderCurrentAnalysis(AppData.analysis, AppData.history || []);
+}
+
+async function _bgRefreshAnalysis() {
+    const [resA, resH] = await Promise.all([
+        api('getAnalysisData', null, null, true),
+        api('getCallingHistory', { page:1, pageSize:5000 }, null, true)
+    ]);
+    if (resA) AppData.analysis = resA.data;
+    if (resH) { AppData.history = resH.data; _buildHistoryIndex(resH.data); }
+    if (AppData.analysis && AppState.currentPage === 'analysis') {
+        renderCurrentAnalysis(AppData.analysis, AppData.history || []);
+    }
 }
 
 function renderCurrentAnalysis(data, history) {
@@ -1613,14 +1772,14 @@ function renderUserAnalysis(data, history) {
         let dateStr;
         try { const parts = String(h['Timestamp']).split(' '); dateStr = _parseDateToStr(parts[0]); if (!dateStr) dateStr = parts[0]; }
         catch { continue; }
-        if (!dayMap[dateStr]) dayMap[dateStr] = { calls:[] };
+        if (!dayMap[dateStr]) dayMap[dateStr] = { calls: [] };
         dayMap[dateStr].calls.push({ inv:h['Invoice No.']||'', amt:parseFloat(h['Amount Received'])||0, cust:h['Customer Name']||'', remarks:h['Remarks']||'' });
     }
-    const dates = Object.keys(dayMap).sort((a,b) => b.localeCompare(a));
-    const todayTotalCount = AppData.today ? AppData.today.length : 0;
-    const totalCalls = history.length;
-    const totalCollection = history.reduce((s,h) => s+(parseFloat(h['Amount Received'])||0), 0);
-    const daysWithCalls = dates.length;
+    const dates            = Object.keys(dayMap).sort((a,b) => b.localeCompare(a));
+    const todayTotalCount  = AppData.today ? AppData.today.length : 0;
+    const totalCalls       = history.length;
+    const totalCollection  = history.reduce((s,h) => s+(parseFloat(h['Amount Received'])||0), 0);
+    const daysWithCalls    = dates.length;
     document.getElementById('analysis-content').innerHTML = `
     <div class="analysis-grid">
       <div class="stat-card"><span class="stat-label">Total Calls Logged</span><div class="stat-value">${totalCalls}</div><div class="stat-footer">All time</div></div>
@@ -1640,11 +1799,11 @@ function renderUserAnalysis(data, history) {
         ${!dates.length ? '<div class="empty-state"><span class="icon">📋</span><p>Koi call history nahi</p></div>' :
           dates.slice(0,30).map(dateStr => {
             const day = dayMap[dateStr];
-            const callsDone = day.calls.length;
-            const isToday = dateStr === _todayStr;
+            const callsDone  = day.calls.length;
+            const isToday    = dateStr === _todayStr;
             const totalForDay = isToday ? Math.max(todayTotalCount, callsDone) : callsDone;
-            const donePct = totalForDay > 0 ? (callsDone/totalForDay*100) : 0;
-            const leftPct = isToday ? (100-donePct) : 0;
+            const donePct    = totalForDay > 0 ? (callsDone/totalForDay*100) : 0;
+            const leftPct    = isToday ? (100-donePct) : 0;
             const dayCollection = day.calls.reduce((s,c)=>s+c.amt,0);
             return `<div class="day-bar-row">
               <span class="day-lbl">${fmtDate(dateStr)}</span>
@@ -1678,12 +1837,17 @@ function renderUserAnalysis(data, history) {
 
 function renderDealerAnalysis(data, history) {
     const stats = data.stats || {};
+    // Use AppIndex if available, otherwise build on the fly
     const dealerHistoryMap = {};
-    for (const h of history) {
-        const code = (h['Dealer Code']||'').trim();
-        if (!code) continue;
-        if (!dealerHistoryMap[code]) dealerHistoryMap[code] = [];
-        dealerHistoryMap[code].push(h);
+    if (AppIndex.built) {
+        AppIndex.dealerHistory.forEach((records, code) => { dealerHistoryMap[code] = records; });
+    } else {
+        for (const h of history) {
+            const code = (h['Dealer Code']||'').trim();
+            if (!code) continue;
+            if (!dealerHistoryMap[code]) dealerHistoryMap[code] = [];
+            dealerHistoryMap[code].push(h);
+        }
     }
     document.getElementById('analysis-content').innerHTML = `
     <div class="analysis-grid">
@@ -1720,7 +1884,10 @@ function renderDealerAnalysis(data, history) {
 }
 
 function openDealerModal(code, name) {
-    const histList   = (window._dealerHistoryMap||{})[code] || [];
+    // Fast path: use index
+    const histList   = AppIndex.built
+        ? (AppIndex.dealerHistory.get(code) || [])
+        : ((window._dealerHistoryMap||{})[code] || []);
     const dealerInfo = (window._dealerList||[]).find(d => d.code === code) || {};
     document.getElementById('dealer-modal-name').textContent = name + ' (' + code + ')';
     document.getElementById('dealer-modal-meta').textContent = (dealerInfo.location||'') + (dealerInfo.invoices?' · '+dealerInfo.invoices+' invoices':'');
@@ -1767,10 +1934,10 @@ function openDealerModal(code, name) {
 // ══════════════════════════════════════════════════════
 async function submitAddInvoice() {
     const p = {
-        salesPerson: v('f-sp'), dispatchDate: v('f-dd'), dealerCode: v('f-dc'),
-        customerName: v('f-cn'), location: v('f-loc'), dealerType: v('f-dt'),
-        orderNo: v('f-ord'), dealerPhNo: v('f-ph'), invoiceNo: v('f-inv'),
-        invoiceAmount: v('f-amt'), creditDays: v('f-crd'),
+        salesPerson:   v('f-sp'), dispatchDate: v('f-dd'), dealerCode: v('f-dc'),
+        customerName:  v('f-cn'), location:     v('f-loc'), dealerType: v('f-dt'),
+        orderNo:       v('f-ord'), dealerPhNo:  v('f-ph'), invoiceNo:  v('f-inv'),
+        invoiceAmount: v('f-amt'), creditDays:  v('f-crd'),
     };
     if (!p.salesPerson||!p.customerName||!p.invoiceNo||!p.invoiceAmount) {
         toast('Sab required (*) fields bharo', 'error'); return;
@@ -1779,14 +1946,13 @@ async function submitAddInvoice() {
     const res = await api('addInvoice', p);
     hideLoader();
     if (!res) return;
-    AppData.dashboard=null; AppData.today=null; AppData.active=null; AppData.activeAll=null;
+    AppData.dashboard = null; AppData.today = null; AppData.activeAll = null;
     toast(res.message, 'success');
     closeModal('modal-add');
-    if (AppState.currentPage==='dashboard') loadDashboard(true);
-    if (AppState.currentPage==='active') loadActive(true);
+    if (AppState.currentPage === 'dashboard') loadDashboard(true);
+    if (AppState.currentPage === 'active')    loadActive(true);
 }
 
-// FIX 3: Follow-up date always resets to today
 function openCallModal(dc, name, loc, inv, bal) {
     document.getElementById('c-name').textContent = name;
     document.getElementById('c-inv').textContent  = inv;
@@ -1801,12 +1967,17 @@ function openCallModal(dc, name, loc, inv, bal) {
     const btn = document.getElementById('btn-save-call');
     btn.disabled = false; btn.innerHTML = 'Save Call Log';
     const m = document.getElementById('modal-call');
-    m.dataset.inv=inv; m.dataset.name=name; m.dataset.loc=loc; m.dataset.bal=bal||0;
+    m.dataset.inv = inv; m.dataset.name = name; m.dataset.loc = loc; m.dataset.bal = bal||0;
     openModal('modal-call');
 }
 
-// FIX 5: Modal closes INSTANTLY, API runs in background
-// UPDATED: loggedBy field added from _currentUser
+// ══════════════════════════════════════════════════════
+// SUBMIT LOG CALL
+// Modal instantly close hota hai.
+// History cache NULL nahi hoti — new entry locally
+// append hoti hai + index update hota hai.
+// Remarks modal ab call ke baad bhi fast rahega.
+// ══════════════════════════════════════════════════════
 async function submitLogCall() {
     const m = document.getElementById('modal-call');
     const invoiceNo = m.dataset.inv;
@@ -1820,7 +1991,7 @@ async function submitLogCall() {
         remarks:           v('c-rmk'),
         adjustment:        v('c-adj') || 0,
         adjustmentRemarks: v('c-adjr'),
-        loggedBy:          _currentUser ? _currentUser.email : 'unknown',  // ← NEW
+        loggedBy:          _currentUser ? _currentUser.email : 'unknown',
     };
     const bal = parseFloat(m.dataset.bal) || 0;
     const amt = parseFloat(p.amountReceived) || 0;
@@ -1833,36 +2004,72 @@ async function submitLogCall() {
         toast('Customer remarks daalo', 'error'); return;
     }
 
-    // FIX 5: Close modal INSTANTLY
+    // Modal instantly close
     closeModal('modal-call');
 
     AppState.sessionCallCounts[invoiceNo] = (AppState.sessionCallCounts[invoiceNo]||0) + 1;
 
-    AppData.dashboard=null; AppData.activeAll=null; AppData.history=null; AppData.analysis=null;
-
-    if (AppState.currentPage==='today' && AppData.today) {
-        _updateCardInPlace(invoiceNo, p);
-    } else if (AppState.currentPage==='active') {
-        if (AppData.activeAll) {
-            const rec = AppData.activeAll.find(r => r['Invoice No.']=== invoiceNo);
-            if (rec) {
-                rec['Balance'] = Math.max(0, (rec['Balance']||0)-amt-adj);
-                if (rec['Balance']<=0) rec.status='Paid';
-            }
-            applyActiveFilter();
+    // ── Local cache update (optimistic) ──────────────────
+    // 1. Active payments balance update
+    if (AppData.activeAll) {
+        const rec = AppData.activeAll.find(r => r['Invoice No.'] === invoiceNo);
+        if (rec) {
+            rec['Balance'] = Math.max(0, (rec['Balance']||0) - amt - adj);
+            if (rec['Balance'] <= 0) rec.status = 'Paid';
         }
+        if (AppState.currentPage === 'active') applyActiveFilter();
     }
+
+    // 2. Today's calling in-place update
+    if (AppState.currentPage === 'today' && AppData.today) {
+        _updateCardInPlace(invoiceNo, p);
+    }
+
+    // 3. History cache — append locally (no re-fetch needed)
+    //    Yeh ensure karta hai ki remarks modal call ke baad bhi fast ho
+    const newEntry = {
+        'Timestamp':          new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+        'Dealer Code':        p.dealerCode,
+        'Customer Name':      p.customerName,
+        'Invoice No.':        invoiceNo,
+        'Amount Received':    amt,
+        'Follow Up Date':     p.followUpDate,
+        'Scheduled Follow-up': p.followUpDate,
+        'Remarks':            p.remarks,
+        'Adjustment Amount':  adj,
+        'Adjustment Remarks': p.adjustmentRemarks,
+    };
+    if (AppData.history) {
+        AppData.history.unshift(newEntry);
+    }
+    // Index mein add karo
+    _indexNewCallEntry(newEntry);
+
+    // Dashboard invalidate (numbers change honge)
+    AppData.dashboard = null;
 
     toast('📤 Saving call log...', 'info');
 
+    // Background API call
     const res = await api('logCall', p, undefined, true);
 
     if (res) {
         toast('✅ Call logged successfully!', 'success');
-        if (AppState.currentPage==='dashboard') loadDashboard(true);
-        else if (AppState.currentPage==='history') loadHistory(true);
+        if (AppState.currentPage === 'dashboard') loadDashboard(true);
+        else if (AppState.currentPage === 'history') {
+            // Re-render with updated local data
+            const ps = PAGE_SIZE.history;
+            if (AppData.history) renderHistoryRows(AppData.history.slice(0,ps), { page:1, pageSize:ps, total:AppData.history.length, totalPages:Math.ceil(AppData.history.length/ps) });
+        }
     } else {
+        // Rollback optimistic updates
         AppState.sessionCallCounts[invoiceNo] = Math.max(0, (AppState.sessionCallCounts[invoiceNo]||1)-1);
+        if (AppData.history) { AppData.history.shift(); }
+        // Remove from index
+        if (AppIndex.invoiceHistory) {
+            const arr = AppIndex.invoiceHistory.get(invoiceNo);
+            if (arr && arr.length) arr.shift();
+        }
         toast('⚠️ Save failed — please try again', 'error');
     }
 }
@@ -1925,7 +2132,7 @@ async function runArchiveNow() {
     const res = await api('archiveNow');
     hideLoader();
     if (!res) return;
-    AppData.dashboard=null; AppData.today=null; AppData.activeAll=null; AppData.archived=null;
+    AppData.dashboard = null; AppData.today = null; AppData.activeAll = null; AppData.archived = null;
     toast(res.message, 'success');
     nav(AppState.currentPage, true);
 }
@@ -1935,9 +2142,9 @@ function downloadActiveExcel() {
     if (!allData||!allData.length) { toast('Pehle Active Payments page kholo', 'error'); return; }
     let filtered = allData;
     const f = AppState.activeFilter;
-    if (f==='Paid') filtered=allData.filter(r=>r.status==='Paid');
+    if      (f==='Paid')   filtered=allData.filter(r=>r.status==='Paid');
     else if (f==='Active') filtered=allData.filter(r=>r.status!=='Paid');
-    else if (f!=='all') filtered=allData.filter(r=>r.priority===f&&r.status!=='Paid');
+    else if (f!=='all')    filtered=allData.filter(r=>r.priority===f&&r.status!=='Paid');
     if (!filtered.length) { toast('Koi record nahi', 'info'); return; }
     const headers = ['Customer Name','Dealer Code','Phone No.','Invoice No.','Sales Person','Invoice Amount','Balance','Dispatch Date','Due Date','Due Days','Priority','Status'];
     const csvRows = [headers.join(',')];
@@ -1963,32 +2170,62 @@ function downloadActiveExcel() {
 }
 
 // ══════════════════════════════════════════════════════
-// INVOICE REMARKS MODAL
+// INVOICE REMARKS MODAL — FAST (Index-based)
+//
+// Priority order:
+//   1. AppIndex.invoiceHistory (Map) — O(1), instant ✅
+//   2. AppData.history (Array) — O(n) scan, then build index
+//   3. Network fetch — only if no cache at all
 // ══════════════════════════════════════════════════════
 async function openRemarksModal(invoiceNo, customerName, dealerCode, balance) {
     document.getElementById('remarks-modal-name').textContent = customerName + ' (' + dealerCode + ')';
     document.getElementById('remarks-modal-meta').textContent = 'Invoice: ' + invoiceNo + '  ·  Balance: ' + fmt(balance);
-    document.getElementById('remarks-modal-timeline').innerHTML = '<div class="empty-state"><span class="icon">⏳</span><p>Loading history...</p></div>';
-    document.getElementById('remarks-modal-stats').innerHTML = '';
     openModal('modal-remarks');
-    let histData = AppData.history;
-    if (!histData) {
-        const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
-        if (res) { AppData.history=res.data; histData=res.data; }
-    }
-    if (!histData) {
-        document.getElementById('remarks-modal-timeline').innerHTML = '<div class="empty-state"><span class="icon">❌</span><p>History load nahi ho saki</p></div>';
+
+    // Fast path 1: Index available → instant render
+    if (AppIndex.built && AppIndex.invoiceHistory) {
+        const records = AppIndex.invoiceHistory.get(invoiceNo) || [];
+        _renderRemarksModalContent(records, balance);
         return;
     }
-    const records = histData.filter(h => h['Invoice No.']=== invoiceNo);
+
+    // Fast path 2: History array available → filter + build index for next time
+    if (AppData.history) {
+        const records = AppData.history.filter(h => h['Invoice No.'] === invoiceNo);
+        _buildHistoryIndex(AppData.history); // Build index so next time is O(1)
+        _renderRemarksModalContent(records, balance);
+        return;
+    }
+
+    // Slow path: No cache — show loader, fetch once
+    document.getElementById('remarks-modal-timeline').innerHTML = `
+        <div class="empty-state">
+            <div class="spinner" style="width:24px;height:24px;border-width:2px"></div>
+            <p style="margin-top:8px">Loading history...</p>
+        </div>`;
+    document.getElementById('remarks-modal-stats').innerHTML = '';
+
+    const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
+    if (res) {
+        AppData.history = res.data;
+        _buildHistoryIndex(res.data);
+        const records = AppIndex.invoiceHistory.get(invoiceNo) || [];
+        _renderRemarksModalContent(records, balance);
+    } else {
+        document.getElementById('remarks-modal-timeline').innerHTML =
+            '<div class="empty-state"><span class="icon">❌</span><p>History load nahi ho saki</p></div>';
+    }
+}
+
+function _renderRemarksModalContent(records, balance) {
     const totalCalls    = records.length;
     const totalReceived = records.reduce((s,h)=>s+(parseFloat(h['Amount Received'])||0),0);
     const totalAdj      = records.reduce((s,h)=>s+(parseFloat(h['Adjustment Amount'])||0),0);
     document.getElementById('remarks-modal-stats').innerHTML = [
-        ['📞 Total Calls', totalCalls, 'var(--blue)'],
-        ['💰 Total Received', fmt(totalReceived), 'var(--green)'],
-        ['📋 Adjustments', fmt(totalAdj), 'var(--orange)'],
-        ['💳 Current Balance', fmt(balance), 'var(--red)'],
+        ['📞 Total Calls',    totalCalls,          'var(--blue)'],
+        ['💰 Total Received', fmt(totalReceived),   'var(--green)'],
+        ['📋 Adjustments',    fmt(totalAdj),        'var(--orange)'],
+        ['💳 Current Balance',fmt(balance),         'var(--red)'],
     ].map(([lbl,val,color]) => `
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;flex:1;min-width:110px">
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${lbl}</div>
@@ -2073,7 +2310,7 @@ function pill(priority) {
 }
 
 function esc(s) { return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"'); }
-function v(id) { return (document.getElementById(id)||{}).value||''; }
+function v(id)  { return (document.getElementById(id)||{}).value||''; }
 </script>
 </body>
 </html>
