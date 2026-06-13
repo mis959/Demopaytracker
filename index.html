@@ -1392,6 +1392,7 @@ function _buildCallCardHTML(r) {
       </div>
       <div class="call-actions" style="margin-left:16px">
         <button class="btn btn-primary btn-sm" onclick="openCallModal('${esc(r['Dealer Code'])}','${esc(r['Customer Name'])}','${esc(r['Location']||'')}','${esc(r['Invoice No.'])}',${r['Balance']})">✍️ Log Call</button>
+        <button class="btn btn-ghost btn-sm" onclick="openRemarksModal('${esc(r['Invoice No.'])}','${esc(r['Customer Name'])}','${esc(r['Dealer Code'])}',${r['Balance']||0})">📋 Remarks</button>
       </div>
     </div>`;
 }
