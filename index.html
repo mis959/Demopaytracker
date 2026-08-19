@@ -855,23 +855,19 @@ function setProgress(p) { _pct = p; document.getElementById('progress-fill').sty
 
 // ══════════════════════════════════════════════════════
 // API
-// v15.1: all requests go through a single-lane queue so only ONE
-// POST to WEBAPP_URL is ever in flight at a time. Firing several
-// requests to a GAS web app back-to-back (e.g. dashboard + today
-// calling right after login) is a known source of flaky/failed
-// responses (including spurious 404s) — queueing fixes that.
-// Each request also auto-retries once on failure before giving up.
+// v15.2: requests fire CONCURRENTLY again (no serialization queue —
+// that was making every call wait behind the previous one, which is
+// what was making the app feel slow). To stay robust without the
+// speed cost:
+//   • Each request gets a 15s timeout (AbortController) so a hung
+//     GAS execution fails fast instead of sitting forever.
+//   • On failure, ONE quick retry fires immediately (no artificial
+//     delay) — most GAS hiccups resolve on the very next attempt.
 // ══════════════════════════════════════════════════════
-let _apiQueue = Promise.resolve();
+const _API_TIMEOUT_MS = 15000;
 
 function api(action, payload, query, silent) {
-    // Chain onto the queue so calls never overlap.
-    const run = () => _doApiCall(action, payload, query, silent);
-    const result = _apiQueue.then(run, run);
-    // Keep the queue alive even if this call fails, and never let a
-    // rejection here break the chain for the NEXT queued call.
-    _apiQueue = result.catch(() => {});
-    return result;
+    return _doApiCall(action, payload, query, silent);
 }
 
 async function _doApiCall(action, payload, query, silent, _isRetry) {
@@ -880,8 +876,10 @@ async function _doApiCall(action, payload, query, silent, _isRetry) {
     const body = { action };
     if (payload !== undefined) body.payload = payload;
     if (query   !== undefined) body.query   = query;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), _API_TIMEOUT_MS);
     try {
-        const res = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body), redirect:'follow' });
+        const res = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body), redirect:'follow', signal: controller.signal });
         if (!res.ok) {
             const bodyText = await res.text().catch(() => '');
             console.error('PayTrack API non-OK response', { action, status: res.status, body: bodyText.slice(0, 500) });
@@ -893,17 +891,15 @@ async function _doApiCall(action, payload, query, silent, _isRetry) {
         if (!data.success) { if (!silent) toast(data.message || 'Server error', 'error'); return null; }
         return data;
     } catch(err) {
-        // Auto-retry once for transient failures (network blip, GAS hiccup)
-        if (!_isRetry) {
-            await new Promise(r => setTimeout(r, 900));
-            return _doApiCall(action, payload, query, silent, true);
-        }
-        let msg = err.message;
-        if (msg.includes('Failed to fetch')) msg = 'CORS/network error. Deploy settings check karo.';
+        const isAbort = err.name === 'AbortError';
+        // One immediate retry for transient failures (no sleep — speed matters)
+        if (!_isRetry) return _doApiCall(action, payload, query, silent, true);
+        let msg = isAbort ? 'Timeout — server slow ho raha hai' : err.message;
+        if (!isAbort && msg.includes('Failed to fetch')) msg = 'CORS/network error. Deploy settings check karo.';
         console.error('PayTrack API error', { action, error: msg });
         if (!silent) toast('Error: ' + msg, 'error');
         return null;
-    } finally { if (!silent) endProgress(); }
+    } finally { clearTimeout(timer); if (!silent) endProgress(); }
 }
 
 // ── SWR badge helpers ──────────────────────────────────
