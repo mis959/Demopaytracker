@@ -317,7 +317,7 @@
             </button>
         </div>
     </div>
-    <div class="login-footer-txt">PayTrack v16 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
+    <div class="login-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
 </div>
 
 <div class="progress-bar-wrap" id="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
@@ -354,7 +354,7 @@
         <button class="nav-btn" onclick="openModal('modal-settings')"><span class="nav-icon">⚙️</span> Settings</button>
     </nav>
     <div class="sidebar-footer">
-        <span class="sidebar-footer-txt">PayTrack v16 &nbsp;·&nbsp; © 2026</span>
+        <span class="sidebar-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026</span>
     </div>
 </aside>
 
@@ -660,29 +660,51 @@
 
 <script>
 // ══════════════════════════════════════════════════════
-// PAYTRACK v16.0
-// Fix from v15.2 (root cause of intermittent login 404 / timeouts):
-//   • v15.2 REMOVED the single-flight request queue that v15 had
-//     added, to make calls "concurrent for speed". This reintroduced
-//     the exact bug v15 was written to fix: GAS web apps behave
-//     unreliably (404 / hang) when 2+ POST requests hit the same
-//     deployment at once (very common right after login, when
-//     dashboard+today+history all fire together).
-//   • v16 brings back a SERIALIZED single-flight queue: every call
-//     through api() — including doLogin — is chained so only ONE
-//     request is ever in flight to the Apps Script backend at a time.
-//   • Retry now waits with backoff (500ms, 1000ms) instead of
-//     retrying instantly, avoiding retry-storms when GAS is already
-//     under load. Timeout raised 15s → 20s since a queued call may
-//     wait behind another before it even starts.
-//   • Added a small localStorage cache (5 min TTL) for dashboard
-//     data so the page paints instantly on open/reload, while a
-//     single serialized background call refreshes it — reduces how
-//     many calls need to race at startup.
+// PAYTRACK v15.3
+// v15.3 fix (this update):
+//   • DUPLICATE-SAVE FIX — every "Log Call" now carries a unique
+//     requestId (generated fresh each time the modal opens). The
+//     backend (logCall in Code.gs) remembers processed requestIds
+//     for 30 minutes and returns the ORIGINAL result if the same
+//     request arrives again — so a client-side timeout auto-retry,
+//     or an accidental double-click, can NEVER save the same call
+//     twice or double-deduct a balance.
+//   • SPEED FIX — the backend no longer rewrites the entire
+//     "Today Calling" sheet on every single call log (that sheet
+//     was never read by the app itself — getTodayCalling() always
+//     computes live from "Active Payment"). That rewrite was the
+//     main reason saves could run past the 15s client timeout.
+//     Saves should feel dramatically faster now.
+//   • HONEST FAILURE HANDLING — if logCall() genuinely fails to
+//     get a response back to the client (both attempts time out),
+//     the app no longer just declares "failed" and reverts local
+//     state. It re-fetches fresh data from the server so the UI
+//     reflects ground truth — since the request might well have
+//     saved successfully server-side even though the response
+//     didn't make it back.
+//
+// v15.1 fixes retained (unchanged):
+//   • api() calls fire concurrently with a 15s timeout + 1 fast
+//     retry on failure (no artificial delay).
+//   • WEBAPP_URL is trimmed of stray whitespace/newlines.
+//   • doLogin() goes through the same api() pipeline as everything
+//     else.
+//   • Errors are logged to console.error with full detail.
 // ══════════════════════════════════════════════════════
 
 let WEBAPP_URL = (localStorage.getItem('paytrack_webapp_url')
-    || 'https://script.google.com/macros/s/AKfycbwFud_Al-nPoMVoz7_F25UzBRBT2oizEDvgAqGvQZrB24B1jjs5Gi_SGWPJcl7BqNKf/exec').trim();
+    || 'https://script.google.com/macros/s/AKfycbw4WKLk2pyHLEqLIwM8qmg5E-ZXFYWvx94Br7SVWt7YDjWPhYs7Ij9n4anMLMsoxGI3/exec').trim();
+
+// ── REQUEST ID GENERATOR ───────────────────────────────
+// v15.3: used to make mutating calls (currently: logCall) idempotent.
+// A fresh id is generated whenever the Log Call modal is opened, and
+// stays fixed for that modal session — even if api() auto-retries
+// internally, the same id is sent both times, so the backend only
+// ever saves it once.
+function _genRequestId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+}
 
 // ── SESSION ────────────────────────────────────────────
 let _currentUser = null;
@@ -712,26 +734,6 @@ function _renderUserBadge(user) {
 function logoutUser() {
     if (!confirm('Logout karna chahte ho?')) return;
     _clearSession(); location.reload();
-}
-
-// ══════════════════════════════════════════════════════
-// LOCAL (BROWSER) CACHE — short TTL, just for instant paint
-// v16 NEW: separate from AppData in-memory cache — this survives
-// page reload/refresh so dashboard shows something instantly
-// instead of a blank skeleton while the (single) API call runs.
-// ══════════════════════════════════════════════════════
-const LS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-function _lsSet(key, data) {
-    try { localStorage.setItem('pt_lc_' + key, JSON.stringify({ t: Date.now(), d: data })); } catch(e) {}
-}
-function _lsGet(key) {
-    try {
-        const raw = localStorage.getItem('pt_lc_' + key);
-        if (!raw) return null;
-        const obj = JSON.parse(raw);
-        if (Date.now() - obj.t > LS_CACHE_TTL_MS) return null;
-        return obj.d;
-    } catch(e) { return null; }
 }
 
 // ══════════════════════════════════════════════════════
@@ -874,25 +876,26 @@ function endProgress() {
 function setProgress(p) { _pct = p; document.getElementById('progress-fill').style.width = p + '%'; }
 
 // ══════════════════════════════════════════════════════
-// API — v16: SERIALIZED SINGLE-FLIGHT QUEUE
-// Root cause of "kabhi kabhi 404 / timeout" was concurrent POSTs
-// hitting the GAS web app at the same time. Every api() call —
-// including login — now goes through _apiQueue, so only ONE
-// request is ever in flight to WEBAPP_URL at a time, no matter
-// how many places in the code call api() "at once".
+// API
+// Requests fire CONCURRENTLY (no serialization queue — that made
+// every call wait behind the previous one and felt slow). To stay
+// robust without the speed cost:
+//   • Each request gets a 15s timeout (AbortController) so a hung
+//     GAS execution fails fast instead of sitting forever.
+//   • On failure, ONE quick retry fires immediately (no artificial
+//     delay) — most GAS hiccups resolve on the very next attempt.
+//   • Mutating calls that include a requestId in their payload
+//     (currently: logCall) are safe to retry — the backend will
+//     recognize the repeat and just return the original result
+//     instead of processing it again. See _genRequestId() above.
 // ══════════════════════════════════════════════════════
-const _API_TIMEOUT_MS = 20000;
-let _apiQueue = Promise.resolve();
+const _API_TIMEOUT_MS = 15000;
 
 function api(action, payload, query, silent) {
-    const run = () => _doApiCall(action, payload, query, silent);
-    const result = _apiQueue.then(run, run); // run regardless of previous call's outcome
-    _apiQueue = result.catch(() => {});       // keep the chain alive even after an error
-    return result;
+    return _doApiCall(action, payload, query, silent);
 }
 
-async function _doApiCall(action, payload, query, silent, _retryCount) {
-    _retryCount = _retryCount || 0;
+async function _doApiCall(action, payload, query, silent, _isRetry) {
     if (!WEBAPP_URL) { toast('Pehle Web App URL set karo (⚙️ Settings)', 'error'); return null; }
     if (!silent) startProgress();
     const body = { action };
@@ -914,16 +917,13 @@ async function _doApiCall(action, payload, query, silent, _retryCount) {
         return data;
     } catch(err) {
         const isAbort = err.name === 'AbortError';
-        // v16: retry with backoff (was instant retry in v15.2 — caused retry-storms)
-        if (_retryCount < 2) {
-            clearTimeout(timer);
-            if (!silent) endProgress();
-            await new Promise(r => setTimeout(r, 500 * (_retryCount + 1)));
-            return _doApiCall(action, payload, query, silent, _retryCount + 1);
-        }
+        // One immediate retry for transient failures (no sleep — speed matters).
+        // Safe to retry even for mutating calls because logCall's requestId
+        // makes the backend idempotent — a repeat never double-saves.
+        if (!_isRetry) return _doApiCall(action, payload, query, silent, true);
         let msg = isAbort ? 'Timeout — server slow ho raha hai' : err.message;
         if (!isAbort && msg.includes('Failed to fetch')) msg = 'CORS/network error. Deploy settings check karo.';
-        console.error('PayTrack API error', { action, error: msg, retries: _retryCount });
+        console.error('PayTrack API error', { action, error: msg });
         if (!silent) toast('Error: ' + msg, 'error');
         return null;
     } finally { clearTimeout(timer); if (!silent) endProgress(); }
@@ -934,7 +934,7 @@ function _showSwrBadge(id) { const el = document.getElementById(id); if (el) el.
 function _hideSwrBadge(id) { const el = document.getElementById(id); if (el) el.innerHTML = ''; }
 
 // ══════════════════════════════════════════════════════
-// LOGIN — goes through the SAME single-flight queue
+// LOGIN — routed through the same api() pipeline
 // ══════════════════════════════════════════════════════
 async function doLogin() {
     const emailEl = document.getElementById('login-email');
@@ -1002,40 +1002,29 @@ async function hardRefresh() {
     AppState.sessionCallCounts = {}; AppState.lastCallMap = {};
     AppState.activeSearchQuery = '';
     AppState.activeSalesPersonFilter = ''; AppState.activeSortField = null; AppState.activeSortDir = null;
-    try { localStorage.removeItem('pt_lc_dashboard'); } catch(e) {}
     await api('clearCache', null, null, true);
     toast('Cache cleared! Refreshing...', 'info');
     nav(AppState.currentPage, true);
 }
 
 // ══════════════════════════════════════════════════════
-// DASHBOARD — SWR + localStorage instant paint
+// DASHBOARD — SWR
 // ══════════════════════════════════════════════════════
 async function loadDashboard(force) {
     if (!force && AppData.dashboard) {
         renderDashboard(AppData.dashboard, true);
         _bgRefreshDashboard(); return;
     }
-    // v16: instant paint from localStorage cache while the (single, queued) fresh call runs
-    if (!force) {
-        const cached = _lsGet('dashboard');
-        if (cached) renderDashboard(cached, true);
-    }
     const res = await api('getDashboardData');
     if (!res) return;
     AppData.dashboard = res.data;
-    _lsSet('dashboard', res.data);
     renderDashboard(res.data, res.fromCache);
     if (!AppData.today) api('getTodayCalling', null, null, true).then(r => { if (r) AppData.today = r.data; });
 }
 
 async function _bgRefreshDashboard() {
     const res = await api('getDashboardData', null, null, true);
-    if (res) {
-        AppData.dashboard = res.data;
-        _lsSet('dashboard', res.data);
-        if (AppState.currentPage === 'dashboard') renderDashboard(res.data, false);
-    }
+    if (res) { AppData.dashboard = res.data; if (AppState.currentPage === 'dashboard') renderDashboard(res.data, false); }
 }
 
 function renderDashboard(d, fromCache) {
@@ -1448,6 +1437,9 @@ function renderActiveRows(pageData, pagination, allFiltered) {
 
 // ══════════════════════════════════════════════════════
 // COLLECTION TAB — date-wise payments only
+// v14: Analysis ki jagah yeh tab aaya.
+//      Sirf Amount Received > 0 wale records dikhte hain.
+//      Adjustment-only entries exclude hote hain.
 // ══════════════════════════════════════════════════════
 async function loadCollection(force) {
     const container = document.getElementById('collection-container');
@@ -1724,7 +1716,6 @@ async function submitAddInvoice() {
     hideLoader();
     if (!res) return;
     AppData.dashboard = null; AppData.today = null; AppData.activeAll = null;
-    try { localStorage.removeItem('pt_lc_dashboard'); } catch(e) {}
     toast(res.message, 'success');
     closeModal('modal-add');
     if (AppState.currentPage === 'dashboard') loadDashboard(true);
@@ -1746,6 +1737,9 @@ function openCallModal(dc, name, loc, inv, bal) {
     btn.disabled = false; btn.innerHTML = 'Save Call Log';
     const m = document.getElementById('modal-call');
     m.dataset.inv = inv; m.dataset.name = name; m.dataset.loc = loc; m.dataset.bal = bal||0;
+    // v15: fresh idempotency key for this modal session — sent with the
+    // save so a client-side retry or double-click can never duplicate it.
+    m.dataset.reqId = _genRequestId();
     openModal('modal-call');
 }
 
@@ -1763,6 +1757,7 @@ async function submitLogCall() {
         adjustment:        v('c-adj') || 0,
         adjustmentRemarks: v('c-adjr'),
         loggedBy:          _currentUser ? _currentUser.email : 'unknown',
+        requestId:         m.dataset.reqId,   // v15: idempotency key
     };
     const bal = parseFloat(m.dataset.bal) || 0;
     const amt = parseFloat(p.amountReceived) || 0;
@@ -1803,9 +1798,13 @@ async function submitLogCall() {
     if (AppData.history) AppData.history.unshift(newEntry);
     _indexNewCallEntry(newEntry);
     AppData.dashboard = null;
-    try { localStorage.removeItem('pt_lc_dashboard'); } catch(e) {}
 
     toast('📤 Saving call log...', 'info');
+    // v15: requestId travels with this call. If api()'s internal retry
+    // fires (transient network hiccup), the backend sees the SAME
+    // requestId both times and only saves once — see logCall() in
+    // Code.gs. This is what makes it safe to just retry instead of
+    // guessing whether the first attempt actually landed.
     const res = await api('logCall', p, undefined, true);
     if (res) {
         toast('✅ Call logged successfully!', 'success');
@@ -1817,6 +1816,14 @@ async function submitLogCall() {
             if (AppData.history) renderCollection(AppData.history);
         }
     } else {
+        // v15: Both attempts failed to return a response — but because
+        // logCall() is idempotent, the save may well have gone through
+        // on the server anyway (e.g. response got lost on the way back).
+        // So instead of blindly declaring "failed" and reverting local
+        // state (which used to risk telling the user to save again and
+        // create a genuine duplicate with a NEW requestId), roll back
+        // the optimistic UI edits and pull fresh ground-truth from the
+        // server to show what's actually true.
         AppState.sessionCallCounts[invoiceNo] = Math.max(0, (AppState.sessionCallCounts[invoiceNo]||1)-1);
         if (AppData.history) AppData.history.shift();
         if (AppIndex.invoiceHistory) {
@@ -1824,7 +1831,15 @@ async function submitLogCall() {
             const arr = AppIndex.invoiceHistory.get(compKey);
             if (arr && arr.length) arr.shift();
         }
-        toast('⚠️ Save failed — please try again', 'error');
+        toast('⚠️ Connection slow — confirming actual status...', 'info');
+        AppData.dashboard = null; AppData.activeAll = null; AppData.today = null; AppData.history = null;
+        AppIndex.invoiceHistory = null; AppIndex.dealerHistory = null; AppIndex.built = false;
+        if (AppState.currentPage === 'active')     await loadActive(true);
+        else if (AppState.currentPage === 'today') await loadToday(true);
+        else if (AppState.currentPage === 'history')    await loadHistory(true);
+        else if (AppState.currentPage === 'collection') await loadCollection(true);
+        await loadDashboard(true);
+        toast('↺ Status confirmed — check kar lo, agar log mil gaya ho to dubara mat bharna', 'info');
     }
 }
 
@@ -1899,7 +1914,6 @@ async function runArchiveNow() {
     hideLoader();
     if (!res) return;
     AppData.dashboard = null; AppData.today = null; AppData.activeAll = null; AppData.archived = null;
-    try { localStorage.removeItem('pt_lc_dashboard'); } catch(e) {}
     toast(res.message, 'success');
     nav(AppState.currentPage, true);
 }
