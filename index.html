@@ -317,7 +317,7 @@
             </button>
         </div>
     </div>
-    <div class="login-footer-txt">PayTrack v14 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
+    <div class="login-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
 </div>
 
 <div class="progress-bar-wrap" id="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
@@ -351,9 +351,10 @@
         <div class="nav-group-label">Actions</div>
         <button class="nav-btn" onclick="openModal('modal-add')"><span class="nav-icon">＋</span> Add Invoice</button>
         <button class="nav-btn" onclick="hardRefresh()"><span class="nav-icon">🔄</span> Force Refresh</button>
+        <button class="nav-btn" onclick="openModal('modal-settings')"><span class="nav-icon">⚙️</span> Settings</button>
     </nav>
     <div class="sidebar-footer">
-        <span class="sidebar-footer-txt">PayTrack v14 &nbsp;·&nbsp; © 2026</span>
+        <span class="sidebar-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026</span>
     </div>
 </aside>
 
@@ -659,15 +660,29 @@
 
 <script>
 // ══════════════════════════════════════════════════════
-// PAYTRACK v15
-// Changes from v14:
-//   • Active Payments: Sales Person filter dropdown
-//   • Active Payments: Sort by Dealer (A-Z/Z-A) & Balance (asc/desc)
-//   • Download now respects current filter+sort (via _getFilteredActiveData)
+// PAYTRACK v15.1
+// Fix from v15:
+//   • api() calls to the Apps Script web app are now SERIALIZED
+//     (one in-flight request at a time) via a request queue.
+//     Google Apps Script web apps can behave unreliably —
+//     including intermittent 404s — when several POST requests
+//     are fired in parallel right after each other (this was
+//     happening right after login: getDashboardData + getTodayCalling
+//     used to fire back-to-back). Serializing fixes this.
+//   • Failed requests now auto-retry once (after a short delay)
+//     before showing an error toast — smooths over transient
+//     network/Apps-Script hiccups.
+//   • WEBAPP_URL is now trimmed of stray whitespace/newlines that
+//     can sneak in via copy-paste and silently break the URL.
+//   • doLogin() now goes through the SAME queued api() pipeline
+//     as every other call, instead of its own separate fetch, so
+//     behaviour is 100% consistent between login and data calls.
+//   • Real errors are now also logged to console.error with full
+//     detail (status + response body) for easier debugging.
 // ══════════════════════════════════════════════════════
 
-let WEBAPP_URL = localStorage.getItem('paytrack_webapp_url')
-    || 'https://script.google.com/macros/s/AKfycbwFud_Al-nPoMVoz7_F25UzBRBT2oizEDvgAqGvQZrB24B1jjs5Gi_SGWPJcl7BqNKf/exec';
+let WEBAPP_URL = (localStorage.getItem('paytrack_webapp_url')
+    || 'https://script.google.com/macros/s/AKfycbwFud_Al-nPoMVoz7_F25UzBRBT2oizEDvgAqGvQZrB24B1jjs5Gi_SGWPJcl7BqNKf/exec').trim();
 
 // ── SESSION ────────────────────────────────────────────
 let _currentUser = null;
@@ -697,37 +712,6 @@ function _renderUserBadge(user) {
 function logoutUser() {
     if (!confirm('Logout karna chahte ho?')) return;
     _clearSession(); location.reload();
-}
-
-// ── LOGIN ──────────────────────────────────────────────
-async function doLogin() {
-    const emailEl = document.getElementById('login-email');
-    const passEl  = document.getElementById('login-pass');
-    const errEl   = document.getElementById('login-error');
-    const btn     = document.getElementById('login-btn');
-    const email   = emailEl.value.trim();
-    const pass    = passEl.value.trim();
-    errEl.style.display = 'none';
-    if (!email || !pass) { errEl.textContent = '⚠️ Email aur password dono required hain'; errEl.style.display = 'block'; return; }
-    btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Verifying...';
-    try {
-        const res = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify({action:'loginUser',payload:{email,password:pass}}), redirect:'follow' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = JSON.parse((await res.text()).replace(/^\uFEFF/,'').trim());
-        if (data.success) {
-            _saveSession(data.user);
-            document.getElementById('login-screen').style.display = 'none';
-            _renderUserBadge(data.user);
-            toast('Welcome, ' + data.user.name + '! 👋', 'success');
-            loadDashboard();
-        } else {
-            errEl.textContent = '❌ ' + (data.message || 'Wrong credentials');
-            errEl.style.display = 'block'; passEl.value = ''; passEl.focus();
-        }
-    } catch(e) {
-        errEl.textContent = '🌐 Network error — WEBAPP_URL check karo (' + e.message + ')';
-        errEl.style.display = 'block';
-    } finally { btn.disabled = false; btn.innerHTML = 'Sign In →'; }
 }
 
 // ══════════════════════════════════════════════════════
@@ -829,6 +813,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('today-date').textContent =
         now.toLocaleDateString('en-IN', { weekday:'short', day:'2-digit', month:'short', year:'numeric' });
     document.getElementById('f-dd').value = now.toISOString().split('T')[0];
+    const settingsUrlInput = document.getElementById('settings-url-input');
+    const settingsCurrentUrl = document.getElementById('settings-current-url');
+    if (settingsUrlInput) settingsUrlInput.value = WEBAPP_URL;
+    if (settingsCurrentUrl) settingsCurrentUrl.textContent = 'Current: ' + (WEBAPP_URL || 'Not set');
     if (!WEBAPP_URL) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('config-banner').classList.remove('hidden');
@@ -867,8 +855,26 @@ function setProgress(p) { _pct = p; document.getElementById('progress-fill').sty
 
 // ══════════════════════════════════════════════════════
 // API
+// v15.1: all requests go through a single-lane queue so only ONE
+// POST to WEBAPP_URL is ever in flight at a time. Firing several
+// requests to a GAS web app back-to-back (e.g. dashboard + today
+// calling right after login) is a known source of flaky/failed
+// responses (including spurious 404s) — queueing fixes that.
+// Each request also auto-retries once on failure before giving up.
 // ══════════════════════════════════════════════════════
-async function api(action, payload, query, silent) {
+let _apiQueue = Promise.resolve();
+
+function api(action, payload, query, silent) {
+    // Chain onto the queue so calls never overlap.
+    const run = () => _doApiCall(action, payload, query, silent);
+    const result = _apiQueue.then(run, run);
+    // Keep the queue alive even if this call fails, and never let a
+    // rejection here break the chain for the NEXT queued call.
+    _apiQueue = result.catch(() => {});
+    return result;
+}
+
+async function _doApiCall(action, payload, query, silent, _isRetry) {
     if (!WEBAPP_URL) { toast('Pehle Web App URL set karo (⚙️ Settings)', 'error'); return null; }
     if (!silent) startProgress();
     const body = { action };
@@ -876,22 +882,64 @@ async function api(action, payload, query, silent) {
     if (query   !== undefined) body.query   = query;
     try {
         const res = await fetch(WEBAPP_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body), redirect:'follow' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+            const bodyText = await res.text().catch(() => '');
+            console.error('PayTrack API non-OK response', { action, status: res.status, body: bodyText.slice(0, 500) });
+            throw new Error('HTTP ' + res.status);
+        }
         const text = await res.text();
         if (!text || !text.trim()) throw new Error('Empty response.');
         const data = JSON.parse(text.replace(/^\uFEFF/,'').trim());
-        if (!data.success) { toast(data.message || 'Server error', 'error'); return null; }
+        if (!data.success) { if (!silent) toast(data.message || 'Server error', 'error'); return null; }
         return data;
     } catch(err) {
+        // Auto-retry once for transient failures (network blip, GAS hiccup)
+        if (!_isRetry) {
+            await new Promise(r => setTimeout(r, 900));
+            return _doApiCall(action, payload, query, silent, true);
+        }
         let msg = err.message;
         if (msg.includes('Failed to fetch')) msg = 'CORS/network error. Deploy settings check karo.';
-        toast('Error: ' + msg, 'error'); return null;
+        console.error('PayTrack API error', { action, error: msg });
+        if (!silent) toast('Error: ' + msg, 'error');
+        return null;
     } finally { if (!silent) endProgress(); }
 }
 
 // ── SWR badge helpers ──────────────────────────────────
 function _showSwrBadge(id) { const el = document.getElementById(id); if (el) el.innerHTML = '<span class="swr-badge">↻ Refreshing</span>'; }
 function _hideSwrBadge(id) { const el = document.getElementById(id); if (el) el.innerHTML = ''; }
+
+// ══════════════════════════════════════════════════════
+// LOGIN — now routed through the same queued api() pipeline
+// ══════════════════════════════════════════════════════
+async function doLogin() {
+    const emailEl = document.getElementById('login-email');
+    const passEl  = document.getElementById('login-pass');
+    const errEl   = document.getElementById('login-error');
+    const btn     = document.getElementById('login-btn');
+    const email   = emailEl.value.trim();
+    const pass    = passEl.value.trim();
+    errEl.style.display = 'none';
+    if (!email || !pass) { errEl.textContent = '⚠️ Email aur password dono required hain'; errEl.style.display = 'block'; return; }
+    btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Verifying...';
+    try {
+        const data = await api('loginUser', { email, password: pass });
+        if (data && data.success) {
+            _saveSession(data.user);
+            document.getElementById('login-screen').style.display = 'none';
+            _renderUserBadge(data.user);
+            toast('Welcome, ' + data.user.name + '! 👋', 'success');
+            loadDashboard();
+        } else {
+            errEl.textContent = '❌ ' + ((data && data.message) || 'Wrong credentials ya connection error — dubara try karo');
+            errEl.style.display = 'block'; passEl.value = ''; passEl.focus();
+        }
+    } catch(e) {
+        errEl.textContent = '🌐 Network error — WEBAPP_URL check karo (' + e.message + ')';
+        errEl.style.display = 'block';
+    } finally { btn.disabled = false; btn.innerHTML = 'Sign In →'; }
+}
 
 // ══════════════════════════════════════════════════════
 // NAVIGATION
