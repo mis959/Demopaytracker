@@ -317,7 +317,7 @@
             </button>
         </div>
     </div>
-    <div class="login-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
+    <div class="login-footer-txt">PayTrack v16 &nbsp;·&nbsp; © 2026 Tarun Paint Co.</div>
 </div>
 
 <div class="progress-bar-wrap" id="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
@@ -347,14 +347,13 @@
         <button class="nav-btn" data-page="active" onclick="nav('active')"><span class="nav-icon">⏳</span> Active Payments</button>
         <button class="nav-btn" data-page="collection" onclick="nav('collection')"><span class="nav-icon">💰</span> Collection</button>
         <button class="nav-btn" data-page="history" onclick="nav('history')"><span class="nav-icon">📋</span> Call History</button>
-        <button class="nav-btn" data-page="archived" onclick="nav('archived')"><span class="nav-icon">📁</span> Archives</button>
         <div class="nav-group-label">Actions</div>
         <button class="nav-btn" onclick="openModal('modal-add')"><span class="nav-icon">＋</span> Add Invoice</button>
         <button class="nav-btn" onclick="hardRefresh()"><span class="nav-icon">🔄</span> Force Refresh</button>
         <button class="nav-btn" onclick="openModal('modal-settings')"><span class="nav-icon">⚙️</span> Settings</button>
     </nav>
     <div class="sidebar-footer">
-        <span class="sidebar-footer-txt">PayTrack v15 &nbsp;·&nbsp; © 2026</span>
+        <span class="sidebar-footer-txt">PayTrack v16 &nbsp;·&nbsp; © 2026</span>
     </div>
 </aside>
 
@@ -530,23 +529,6 @@
                 <div class="pagination" id="history-pagination"></div>
             </div>
         </div>
-
-        <!-- ARCHIVED -->
-        <div class="page" id="page-archived">
-            <div class="card">
-                <div class="card-head">
-                    <span class="card-title">Archived Payments</span>
-                    <span class="card-subtitle" id="archive-count">Historical paid records</span>
-                    <span id="archived-swr-badge"></span>
-                    <button class="btn btn-primary btn-sm" onclick="runArchiveNow()" style="margin-left:auto;background:var(--green)">📦 Archive Paid Now</button>
-                </div>
-                <div class="tbl-wrap"><table>
-                    <thead><tr><th>#</th><th>Customer</th><th>Invoice</th><th>Dealer Type</th><th>Sales Person</th><th>Amount</th><th>Due Date</th><th>Priority</th><th>Archived On</th></tr></thead>
-                    <tbody id="tbl-archived"></tbody>
-                </table></div>
-                <div class="pagination" id="archived-pagination"></div>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -660,50 +642,94 @@
 
 <script>
 // ══════════════════════════════════════════════════════
-// PAYTRACK v15.3
-// v15.3 fix (this update):
-//   • DUPLICATE-SAVE FIX — every "Log Call" now carries a unique
-//     requestId (generated fresh each time the modal opens). The
-//     backend (logCall in Code.gs) remembers processed requestIds
-//     for 30 minutes and returns the ORIGINAL result if the same
-//     request arrives again — so a client-side timeout auto-retry,
-//     or an accidental double-click, can NEVER save the same call
-//     twice or double-deduct a balance.
-//   • SPEED FIX — the backend no longer rewrites the entire
-//     "Today Calling" sheet on every single call log (that sheet
-//     was never read by the app itself — getTodayCalling() always
-//     computes live from "Active Payment"). That rewrite was the
-//     main reason saves could run past the 15s client timeout.
-//     Saves should feel dramatically faster now.
-//   • HONEST FAILURE HANDLING — if logCall() genuinely fails to
-//     get a response back to the client (both attempts time out),
-//     the app no longer just declares "failed" and reverts local
-//     state. It re-fetches fresh data from the server so the UI
-//     reflects ground truth — since the request might well have
-//     saved successfully server-side even though the response
-//     didn't make it back.
+// PAYTRACK v16
+// v16 CHANGES (this update):
+//   • ARCHIVES TAB REMOVED FROM THE WEB APP — no nav entry, no
+//     page, no API calls of any kind related to archives. The
+//     underlying archivePaidInvoices() job in Code.gs is untouched
+//     (still safe to trigger from Apps Script directly / a time
+//     trigger if you ever want it) but nothing in this UI calls it
+//     anymore.
+//   • LOCAL PERSISTENT CACHE (Chrome/localStorage) — every dataset
+//     (dashboard, today, active, history/collection) is mirrored to
+//     localStorage the moment it's fetched. On reload/reopen the
+//     app hydrates instantly from disk and renders BEFORE any
+//     network call — so the app never sits on a blank/skeleton
+//     screen waiting on Google Apps Script.
+//   • NO MORE "REFRESH ON EVERY TAB SWITCH" — previously every nav
+//     click fired a background network call (SWR pattern), even if
+//     data was seconds old. Now a page only re-fetches automatically
+//     if its cached copy is older than 20 minutes (matching the
+//     backend's own 20-min cache window) or when you explicitly hit
+//     a ↺ / Force Refresh button. Switching tabs feels instant.
+//   • SILENT 20-MINUTE AUTO-SYNC — a single background timer quietly
+//     re-pulls whichever datasets are in use every 20 minutes and
+//     updates both localStorage and the on-screen view. It skips
+//     itself entirely while any modal (Add Invoice / Log Call /
+//     Settings / Remarks) is open, so it never interrupts you
+//     mid-entry.
+//   • INSTANT LOCAL SAVE ON CALL LOG — Log Call already updated the
+//     screen optimistically before v16; now that optimistic state is
+//     also written straight to localStorage the same instant, then
+//     sent to the backend/Sheet in the background (still fully
+//     idempotent via requestId, so retries can never double-save or
+//     double-deduct a balance — Sheet data integrity is unaffected).
 //
-// v15.1 fixes retained (unchanged):
+// v15 features retained (unchanged):
+//   • DUPLICATE-SAVE FIX — logCall requestId + backend idempotency.
 //   • api() calls fire concurrently with a 15s timeout + 1 fast
 //     retry on failure (no artificial delay).
-//   • WEBAPP_URL is trimmed of stray whitespace/newlines.
-//   • doLogin() goes through the same api() pipeline as everything
-//     else.
-//   • Errors are logged to console.error with full detail.
+//   • HONEST FAILURE HANDLING — if a save's response never comes
+//     back, the app re-fetches ground truth instead of guessing.
 // ══════════════════════════════════════════════════════
 
 let WEBAPP_URL = (localStorage.getItem('paytrack_webapp_url')
-    || 'https://script.google.com/macros/s/AKfycbw4WKLk2pyHLEqLIwM8qmg5E-ZXFYWvx94Br7SVWt7YDjWPhYs7Ij9n4anMLMsoxGI3/exec').trim();
+    || 'https://script.google.com/macros/s/AKfycbyi9WHIRb_UKjEaGAhstfEGKzWPGVN_pMsRfxXqC2R1vyhP1hWcrH0q8s9EavHShnMznA/exec').trim();
 
 // ── REQUEST ID GENERATOR ───────────────────────────────
-// v15.3: used to make mutating calls (currently: logCall) idempotent.
-// A fresh id is generated whenever the Log Call modal is opened, and
+// Used to make mutating calls (currently: logCall) idempotent. A
+// fresh id is generated whenever the Log Call modal is opened, and
 // stays fixed for that modal session — even if api() auto-retries
 // internally, the same id is sent both times, so the backend only
 // ever saves it once.
 function _genRequestId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+}
+
+// ══════════════════════════════════════════════════════
+// LOCAL PERSISTENT CACHE (Chrome/localStorage) — v16
+// Every dataset gets mirrored here the instant it's fetched, keyed
+// with its own fetch timestamp. This is what lets the app render
+// INSTANTLY on load/reopen (straight from disk) and avoid hitting
+// the network on every tab switch — only when data is missing,
+// stale (>20 min), or the user explicitly asks for a refresh.
+// ══════════════════════════════════════════════════════
+const CACHE_TTL_MS = 20 * 60 * 1000; // 20 minutes — matches backend cache window
+
+function _lsGet(key) {
+    try {
+        const raw = localStorage.getItem('pt_cache_' + key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) { return null; }
+}
+function _lsSet(key, data) {
+    try { localStorage.setItem('pt_cache_' + key, JSON.stringify({ data: data, ts: Date.now() })); }
+    catch (e) { /* storage full/unavailable — app still works, just without persistence */ }
+}
+function _lsFresh(key) {
+    const c = _lsGet(key);
+    return !!(c && (Date.now() - c.ts) < CACHE_TTL_MS);
+}
+function _lsInvalidate(key) {
+    try { localStorage.removeItem('pt_cache_' + key); } catch (e) {}
+}
+function _hydrateFromLocalCache() {
+    const dash = _lsGet('dashboard'); if (dash) AppData.dashboard = dash.data;
+    const tdy  = _lsGet('today');     if (tdy)  AppData.today     = tdy.data;
+    const act  = _lsGet('active');    if (act)  AppData.activeAll = act.data;
+    const hist = _lsGet('history');   if (hist) { AppData.history = hist.data; _buildHistoryIndex(hist.data); }
 }
 
 // ── SESSION ────────────────────────────────────────────
@@ -733,6 +759,8 @@ function _renderUserBadge(user) {
 
 function logoutUser() {
     if (!confirm('Logout karna chahte ho?')) return;
+    if (_autoSyncTimer) { clearInterval(_autoSyncTimer); _autoSyncTimer = null; }
+    ['dashboard','today','active','history'].forEach(_lsInvalidate);
     _clearSession(); location.reload();
 }
 
@@ -741,7 +769,7 @@ function logoutUser() {
 // ══════════════════════════════════════════════════════
 const AppData = {
     dashboard: null, today: null, active: null,
-    activeAll: null, history: null, archived: null,
+    activeAll: null, history: null,
 };
 
 const AppIndex = {
@@ -786,7 +814,7 @@ function _indexNewCallEntry(entry) {
 
 const AppState = {
     currentPage: 'dashboard', activeFilter: 'all',
-    activePage: 1, historyPage: 1, archivedPage: 1,
+    activePage: 1, historyPage: 1,
     todayFilter: 'today', searchTimer: null,
     sessionCallCounts: {}, lastCallMap: {},
     activeSearchQuery: '',  // v14: filter persistence fix
@@ -795,7 +823,7 @@ const AppState = {
     activeSortDir: null,          // v15: 'asc' | 'desc'
 };
 
-const PAGE_SIZE = { active: 100, history: 50, archived: 100 };
+const PAGE_SIZE = { active: 100, history: 50 };
 
 const _todayStr = (() => {
     const d = new Date();
@@ -824,6 +852,7 @@ function saveSettingsUrl() {
     if (isChanged) {
         Object.keys(AppData).forEach(k => AppData[k] = null);
         AppIndex.invoiceHistory = null; AppIndex.dealerHistory = null; AppIndex.built = false;
+        ['dashboard','today','active','history'].forEach(_lsInvalidate);
         toast('✅ URL saved! Reconnecting...', 'success');
         setTimeout(() => loadDashboard(true), 300);
     } else { toast('URL same hai — koi change nahi', 'info'); }
@@ -844,10 +873,15 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('config-banner').classList.remove('hidden');
         return;
     }
+    // v16: hydrate whatever we have on disk immediately, so if a
+    // session is already active the very first paint uses cached
+    // data instead of waiting on the network.
+    _hydrateFromLocalCache();
     if (_checkSession()) {
         document.getElementById('login-screen').style.display = 'none';
         _renderUserBadge(_currentUser);
         loadDashboard();
+        _startAutoSync();
         return;
     }
     document.getElementById('login-email').focus();
@@ -934,6 +968,39 @@ function _showSwrBadge(id) { const el = document.getElementById(id); if (el) el.
 function _hideSwrBadge(id) { const el = document.getElementById(id); if (el) el.innerHTML = ''; }
 
 // ══════════════════════════════════════════════════════
+// 20-MINUTE SILENT AUTO-SYNC — v16
+// One background timer keeps whichever datasets are already loaded
+// fresh, without the user ever having to hit refresh. It fully skips
+// itself while any modal is open so it can never interrupt someone
+// mid-entry (Add Invoice / Log Call / Settings / Remarks).
+// ══════════════════════════════════════════════════════
+let _autoSyncTimer = null;
+function _startAutoSync() {
+    if (_autoSyncTimer) return;
+    _autoSyncTimer = setInterval(_runAutoSync, CACHE_TTL_MS);
+}
+async function _runAutoSync() {
+    if (document.querySelector('.modal-bg.open')) return; // don't disturb an open form
+    if (AppData.dashboard) _bgRefreshDashboard();
+    if (AppData.today) {
+        const r = await api('getTodayCalling', null, null, true);
+        if (r) { AppData.today = r.data; _lsSet('today', r.data); if (AppState.currentPage === 'today') renderToday(r.data); }
+    }
+    if (AppData.activeAll) _bgRefreshActive();
+    if (AppData.history) {
+        const r = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
+        if (r) {
+            AppData.history = r.data; _buildHistoryIndex(r.data); _lsSet('history', r.data);
+            if (AppState.currentPage === 'history') {
+                const ps = PAGE_SIZE.history;
+                renderHistoryRows(r.data.slice(0,ps), { page:1, pageSize:ps, total:r.data.length, totalPages:Math.ceil(r.data.length/ps) });
+            }
+            if (AppState.currentPage === 'collection') renderCollection(r.data);
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════
 // LOGIN — routed through the same api() pipeline
 // ══════════════════════════════════════════════════════
 async function doLogin() {
@@ -954,6 +1021,7 @@ async function doLogin() {
             _renderUserBadge(data.user);
             toast('Welcome, ' + data.user.name + '! 👋', 'success');
             loadDashboard();
+            _startAutoSync();
         } else {
             errEl.textContent = '❌ ' + ((data && data.message) || 'Wrong credentials ya connection error — dubara try karo');
             errEl.style.display = 'block'; passEl.value = ''; passEl.focus();
@@ -974,7 +1042,6 @@ const PAGE_META = {
     collection: ['Collection', 'Date-wise payment received'],
     history:    ['Call History', 'Complete call log records'],
     search:     ['Search Results', 'Matching payment records'],
-    archived:   ['Archived Payments', 'Historical paid records'],
 };
 
 function nav(page, force) {
@@ -993,7 +1060,6 @@ function nav(page, force) {
     if (page === 'active')     loadActive(force);
     if (page === 'collection') loadCollection(force);
     if (page === 'history')    loadHistory(force);
-    if (page === 'archived')   loadArchived(force);
 }
 
 async function hardRefresh() {
@@ -1002,29 +1068,34 @@ async function hardRefresh() {
     AppState.sessionCallCounts = {}; AppState.lastCallMap = {};
     AppState.activeSearchQuery = '';
     AppState.activeSalesPersonFilter = ''; AppState.activeSortField = null; AppState.activeSortDir = null;
+    ['dashboard','today','active','history'].forEach(_lsInvalidate);
     await api('clearCache', null, null, true);
     toast('Cache cleared! Refreshing...', 'info');
     nav(AppState.currentPage, true);
 }
 
 // ══════════════════════════════════════════════════════
-// DASHBOARD — SWR
+// DASHBOARD
+// v16: only background-refreshes if the local cache is older than
+// 20 minutes — no more silent network hit on every single visit.
 // ══════════════════════════════════════════════════════
 async function loadDashboard(force) {
     if (!force && AppData.dashboard) {
         renderDashboard(AppData.dashboard, true);
-        _bgRefreshDashboard(); return;
+        if (!_lsFresh('dashboard')) _bgRefreshDashboard();
+        return;
     }
     const res = await api('getDashboardData');
     if (!res) return;
     AppData.dashboard = res.data;
+    _lsSet('dashboard', res.data);
     renderDashboard(res.data, res.fromCache);
-    if (!AppData.today) api('getTodayCalling', null, null, true).then(r => { if (r) AppData.today = r.data; });
+    if (!AppData.today) api('getTodayCalling', null, null, true).then(r => { if (r) { AppData.today = r.data; _lsSet('today', r.data); } });
 }
 
 async function _bgRefreshDashboard() {
     const res = await api('getDashboardData', null, null, true);
-    if (res) { AppData.dashboard = res.data; if (AppState.currentPage === 'dashboard') renderDashboard(res.data, false); }
+    if (res) { AppData.dashboard = res.data; _lsSet('dashboard', res.data); if (AppState.currentPage === 'dashboard') renderDashboard(res.data, false); }
 }
 
 function renderDashboard(d, fromCache) {
@@ -1137,13 +1208,16 @@ function setTodayFilter(f, el) {
 async function loadToday(force) {
     if (!force && AppData.today) {
         renderToday(AppData.today);
-        api('getTodayCalling', null, null, true).then(r => { if (r) { AppData.today = r.data; if (AppState.currentPage === 'today') renderToday(r.data); } });
+        if (!_lsFresh('today')) {
+            api('getTodayCalling', null, null, true).then(r => { if (r) { AppData.today = r.data; _lsSet('today', r.data); if (AppState.currentPage === 'today') renderToday(r.data); } });
+        }
         return;
     }
     document.getElementById('call-list-container').innerHTML = '<div class="card"><div class="card-body">' + Array(4).fill('<div class="sk sk-row" style="margin:6px 0"></div>').join('') + '</div></div>';
     const res = await api('getTodayCalling');
     if (!res) return;
     AppData.today = res.data;
+    _lsSet('today', res.data);
     renderToday(res.data);
 }
 
@@ -1268,15 +1342,16 @@ function _updateChips(records) {
 }
 
 // ══════════════════════════════════════════════════════
-// ACTIVE PAYMENTS — SWR
+// ACTIVE PAYMENTS
 // v14 FIX: activeSearchQuery — filter persistence
 // v15: Sales Person filter + Dealer/Balance sort
+// v16: only background-refreshes when cache is older than 20 min
 // ══════════════════════════════════════════════════════
 async function loadActive(force) {
     if (!force && AppData.activeAll) {
         _populateSalesPersonFilter();
         applyActiveFilter();
-        _bgRefreshActive();
+        if (!_lsFresh('active')) _bgRefreshActive();
         _preloadHistory();
         return;
     }
@@ -1284,6 +1359,7 @@ async function loadActive(force) {
     const res = await api('getActivePayments', { page:1, pageSize:500 });
     if (!res) return;
     AppData.activeAll = res.data;
+    _lsSet('active', res.data);
     AppState.activePage = 1;
     _populateSalesPersonFilter();
     applyActiveFilter();
@@ -1296,6 +1372,7 @@ async function _bgRefreshActive() {
     _hideSwrBadge('active-swr-badge');
     if (res) {
         AppData.activeAll = res.data;
+        _lsSet('active', res.data);
         if (AppState.currentPage === 'active') { _populateSalesPersonFilter(); applyActiveFilter(); }
     }
 }
@@ -1306,7 +1383,7 @@ async function _preloadHistory() {
     _historyPreloading = true;
     const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
     _historyPreloading = false;
-    if (res) { AppData.history = res.data; _buildHistoryIndex(res.data); }
+    if (res) { AppData.history = res.data; _buildHistoryIndex(res.data); _lsSet('history', res.data); }
 }
 
 function filterActive(f, el) {
@@ -1437,27 +1514,28 @@ function renderActiveRows(pageData, pagination, allFiltered) {
 
 // ══════════════════════════════════════════════════════
 // COLLECTION TAB — date-wise payments only
-// v14: Analysis ki jagah yeh tab aaya.
-//      Sirf Amount Received > 0 wale records dikhte hain.
-//      Adjustment-only entries exclude hote hain.
+// Sirf Amount Received > 0 wale records dikhte hain.
+// Adjustment-only entries exclude hote hain.
 // ══════════════════════════════════════════════════════
 async function loadCollection(force) {
     const container = document.getElementById('collection-container');
     if (!force && AppData.history) {
         renderCollection(AppData.history);
-        // BG refresh
-        api('getCallingHistory', {page:1, pageSize:5000}, null, true).then(r => {
-            if (r) {
-                AppData.history = r.data; _buildHistoryIndex(r.data);
-                if (AppState.currentPage === 'collection') renderCollection(r.data);
-            }
-        });
+        if (!_lsFresh('history')) {
+            api('getCallingHistory', {page:1, pageSize:5000}, null, true).then(r => {
+                if (r) {
+                    AppData.history = r.data; _buildHistoryIndex(r.data); _lsSet('history', r.data);
+                    if (AppState.currentPage === 'collection') renderCollection(r.data);
+                }
+            });
+        }
         return;
     }
     container.innerHTML = '<div class="card"><div class="card-body">' + Array(5).fill('<div class="sk sk-row" style="margin:6px 0"></div>').join('') + '</div></div>';
     const res = await api('getCallingHistory', {page:1, pageSize:5000});
     if (!res) return;
     AppData.history = res.data;
+    _lsSet('history', res.data);
     _buildHistoryIndex(res.data);
     renderCollection(res.data);
 }
@@ -1564,18 +1642,23 @@ function renderCollection(records) {
 }
 
 // ══════════════════════════════════════════════════════
-// CALL HISTORY — SWR
+// CALL HISTORY
+// v16: fetches the same full window (5000 rows) used everywhere
+// else so the local cache is always one consistent dataset, and
+// only re-syncs in the background if the cache is older than 20 min.
 // ══════════════════════════════════════════════════════
 async function loadHistory(force) {
     if (!force && AppData.history) {
         const ps = PAGE_SIZE.history;
         renderHistoryRows(AppData.history.slice(0,ps), { page:1, pageSize:ps, total:AppData.history.length, totalPages:Math.ceil(AppData.history.length/ps) });
-        _bgRefreshHistory(); return;
+        if (!_lsFresh('history')) _bgRefreshHistory();
+        return;
     }
     document.getElementById('tbl-history').innerHTML = Array(5).fill('<tr><td colspan="10"><div class="sk sk-row"></div></td></tr>').join('');
-    const res = await api('getCallingHistory', { page:1, pageSize:500 });
+    const res = await api('getCallingHistory', { page:1, pageSize:5000 });
     if (!res) return;
     AppData.history = res.data;
+    _lsSet('history', res.data);
     AppState.historyPage = 1;
     _buildHistoryIndex(res.data);
     const ps = PAGE_SIZE.history;
@@ -1584,10 +1667,10 @@ async function loadHistory(force) {
 
 async function _bgRefreshHistory() {
     _showSwrBadge('history-swr-badge');
-    const res = await api('getCallingHistory', { page:1, pageSize:500 }, null, true);
+    const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
     _hideSwrBadge('history-swr-badge');
     if (res) {
-        AppData.history = res.data; _buildHistoryIndex(res.data);
+        AppData.history = res.data; _buildHistoryIndex(res.data); _lsSet('history', res.data);
         if (AppState.currentPage === 'history') {
             const ps = PAGE_SIZE.history, pg = AppState.historyPage, start = (pg-1)*ps;
             renderHistoryRows(res.data.slice(start,start+ps), { page:pg, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
@@ -1616,59 +1699,6 @@ function renderHistoryRows(records, pagination) {
         AppState.historyPage = pg;
         const data = AppData.history || [], ps = PAGE_SIZE.history, start = (pg-1)*ps;
         renderHistoryRows(data.slice(start,start+ps), { page:pg, pageSize:ps, total:data.length, totalPages:Math.ceil(data.length/ps) });
-        window.scrollTo({ top:0, behavior:'smooth' });
-    });
-}
-
-// ══════════════════════════════════════════════════════
-// ARCHIVES — SWR
-// ══════════════════════════════════════════════════════
-async function loadArchived(force) {
-    if (!force && AppData.archived) {
-        const ps = PAGE_SIZE.archived;
-        renderArchivedRows(AppData.archived.slice(0,ps), { page:1, pageSize:ps, total:AppData.archived.length, totalPages:Math.ceil(AppData.archived.length/ps) });
-        _bgRefreshArchived(); return;
-    }
-    document.getElementById('tbl-archived').innerHTML = Array(5).fill('<tr><td colspan="9"><div class="sk sk-row"></div></td></tr>').join('');
-    const res = await api('getArchivedData', { page:1, pageSize:500 });
-    if (!res) return;
-    AppData.archived = res.data;
-    document.getElementById('archive-count').textContent = `${res.pagination.total} historical records`;
-    const ps = PAGE_SIZE.archived;
-    renderArchivedRows(res.data.slice(0,ps), { page:1, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
-}
-
-async function _bgRefreshArchived() {
-    _showSwrBadge('archived-swr-badge');
-    const res = await api('getArchivedData', { page:1, pageSize:500 }, null, true);
-    _hideSwrBadge('archived-swr-badge');
-    if (res && AppState.currentPage === 'archived') {
-        AppData.archived = res.data;
-        document.getElementById('archive-count').textContent = `${res.pagination.total} historical records`;
-        const ps = PAGE_SIZE.archived;
-        renderArchivedRows(res.data.slice(0,ps), { page:1, pageSize:ps, total:res.data.length, totalPages:Math.ceil(res.data.length/ps) });
-    }
-}
-
-function renderArchivedRows(data, pagination) {
-    const tbody = document.getElementById('tbl-archived');
-    if (!data.length) { tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><span class="icon">📁</span><p>Koi record nahi</p></div></td></tr>`; document.getElementById('archived-pagination').innerHTML = ''; return; }
-    const start = (pagination.page-1)*pagination.pageSize;
-    tbody.innerHTML = data.map((r,i) => `
-    <tr>
-      <td style="color:var(--text-muted)">${start+i+1}</td>
-      <td><div class="td-primary">${r['Customer Name']}</div><div style="font-size:11px;color:var(--text-muted)">${r['Dealer Code']}</div></td>
-      <td><span class="mono">${r['Invoice No.']}</span></td>
-      <td><span class="badge badge-reminder" style="font-size:11px">${r['Dealer Type']||'—'}</span></td>
-      <td style="font-size:12px">${r['Sales Person']||'—'}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${fmt(r['Invoice Amount'])}</td>
-      <td style="font-size:12px">${fmtDate(r['Payment Due Date'])}</td>
-      <td>${pill(r.priority)}</td>
-      <td style="font-size:11.5px;color:var(--text-muted)">${fmtDate(r['Archived Date'])}</td>
-    </tr>`).join('');
-    renderPagination('archived-pagination', pagination, pg => {
-        const data = AppData.archived||[], ps=PAGE_SIZE.archived, start=(pg-1)*ps;
-        renderArchivedRows(data.slice(start,start+ps), { page:pg, pageSize:ps, total:data.length, totalPages:Math.ceil(data.length/ps) });
         window.scrollTo({ top:0, behavior:'smooth' });
     });
 }
@@ -1716,6 +1746,7 @@ async function submitAddInvoice() {
     hideLoader();
     if (!res) return;
     AppData.dashboard = null; AppData.today = null; AppData.activeAll = null;
+    ['dashboard','today','active'].forEach(_lsInvalidate);
     toast(res.message, 'success');
     closeModal('modal-add');
     if (AppState.currentPage === 'dashboard') loadDashboard(true);
@@ -1777,11 +1808,15 @@ async function submitLogCall() {
         }
         // v14 FIX: applyActiveFilter re-applies both filter AND activeSearchQuery
         if (AppState.currentPage === 'active') applyActiveFilter();
+        // v16: instant local persistence — Chrome ke localStorage me
+        // turant save, backend confirmation ka wait kiye bina.
+        _lsSet('active', AppData.activeAll);
     }
 
     if (AppState.currentPage === 'today' && AppData.today) {
         _updateCardInPlace(invoiceNo, p);
     }
+    if (AppData.today) _lsSet('today', AppData.today);
 
     const newEntry = {
         'Timestamp':          new Date().toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
@@ -1795,16 +1830,19 @@ async function submitLogCall() {
         'Adjustment Amount':  adj,
         'Adjustment Remarks': p.adjustmentRemarks,
     };
-    if (AppData.history) AppData.history.unshift(newEntry);
+    if (AppData.history) { AppData.history.unshift(newEntry); _lsSet('history', AppData.history); }
     _indexNewCallEntry(newEntry);
     AppData.dashboard = null;
+    _lsInvalidate('dashboard'); // totals changed — force a fresh pull next visit
 
     toast('📤 Saving call log...', 'info');
     // v15: requestId travels with this call. If api()'s internal retry
     // fires (transient network hiccup), the backend sees the SAME
     // requestId both times and only saves once — see logCall() in
     // Code.gs. This is what makes it safe to just retry instead of
-    // guessing whether the first attempt actually landed.
+    // guessing whether the first attempt actually landed. Sheet data
+    // is always the source of truth; localStorage is just a fast
+    // mirror of it.
     const res = await api('logCall', p, undefined, true);
     if (res) {
         toast('✅ Call logged successfully!', 'success');
@@ -1816,14 +1854,14 @@ async function submitLogCall() {
             if (AppData.history) renderCollection(AppData.history);
         }
     } else {
-        // v15: Both attempts failed to return a response — but because
+        // Both attempts failed to return a response — but because
         // logCall() is idempotent, the save may well have gone through
         // on the server anyway (e.g. response got lost on the way back).
         // So instead of blindly declaring "failed" and reverting local
         // state (which used to risk telling the user to save again and
         // create a genuine duplicate with a NEW requestId), roll back
         // the optimistic UI edits and pull fresh ground-truth from the
-        // server to show what's actually true.
+        // server — and refresh the local cache from that ground truth.
         AppState.sessionCallCounts[invoiceNo] = Math.max(0, (AppState.sessionCallCounts[invoiceNo]||1)-1);
         if (AppData.history) AppData.history.shift();
         if (AppIndex.invoiceHistory) {
@@ -1834,6 +1872,7 @@ async function submitLogCall() {
         toast('⚠️ Connection slow — confirming actual status...', 'info');
         AppData.dashboard = null; AppData.activeAll = null; AppData.today = null; AppData.history = null;
         AppIndex.invoiceHistory = null; AppIndex.dealerHistory = null; AppIndex.built = false;
+        ['dashboard','active','today','history'].forEach(_lsInvalidate);
         if (AppState.currentPage === 'active')     await loadActive(true);
         else if (AppState.currentPage === 'today') await loadToday(true);
         else if (AppState.currentPage === 'history')    await loadHistory(true);
@@ -1877,12 +1916,6 @@ async function globalSearch(val) {
         renderHistoryRows(filtered.slice(0,ps), { page:1,pageSize:ps,total:filtered.length,totalPages:Math.ceil(filtered.length/ps) });
         return;
     }
-    if (AppState.currentPage === 'archived' && AppData.archived) {
-        const filtered = q ? AppData.archived.filter(r => matchQ(q,r['Customer Name'],r['Invoice No.'],r['Dealer Code'])) : AppData.archived;
-        const ps = PAGE_SIZE.archived;
-        renderArchivedRows(filtered.slice(0,ps), { page:1,pageSize:ps,total:filtered.length,totalPages:Math.ceil(filtered.length/ps) });
-        return;
-    }
     if (q.length < 2) { if (AppState.currentPage === 'search') nav('dashboard'); return; }
     AppState.searchTimer = setTimeout(async () => {
         nav('search');
@@ -1905,17 +1938,6 @@ async function globalSearch(val) {
           <td>${r['Status']!=='Paid'?`<button class="btn btn-outline btn-sm" onclick="openCallModal('${esc(r['Dealer Code'])}','${esc(r['Customer Name'])}','${esc(r['Location']||'')}','${esc(r['Invoice No.'])}',${r['Balance']})">📞</button>`:'—'}</td>
         </tr>`).join('');
     }, 400);
-}
-
-async function runArchiveNow() {
-    if (!confirm('Sab PAID invoices Archive mein move honge. Continue?')) return;
-    loader('Archiving paid invoices...');
-    const res = await api('archiveNow');
-    hideLoader();
-    if (!res) return;
-    AppData.dashboard = null; AppData.today = null; AppData.activeAll = null; AppData.archived = null;
-    toast(res.message, 'success');
-    nav(AppState.currentPage, true);
 }
 
 function downloadActiveExcel() {
@@ -1962,7 +1984,7 @@ async function openRemarksModal(invoiceNo, customerName, dealerCode, balance) {
     document.getElementById('remarks-modal-stats').innerHTML = '';
     const res = await api('getCallingHistory', { page:1, pageSize:5000 }, null, true);
     if (res) {
-        AppData.history = res.data; _buildHistoryIndex(res.data);
+        AppData.history = res.data; _buildHistoryIndex(res.data); _lsSet('history', res.data);
         const compKey = dealerCode + '||' + invoiceNo;
         const records = AppIndex.invoiceHistory.get(compKey) || [];
         _renderRemarksModalContent(records, balance);
